@@ -1,0 +1,43 @@
+version: 2
+
+builds:
+  - main: .
+    binary: nepenthe
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/ryanwersal/nepenthe/cmd.version={{.Version}}
+      - -X github.com/ryanwersal/nepenthe/cmd.commit={{.ShortCommit}}
+      - -X github.com/ryanwersal/nepenthe/cmd.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    files:
+      - LICENSE
+
+brews:
+  - repository:
+      owner: ryanwersal
+      name: homebrew-tap
+    name: nepenthe
+    homepage: https://github.com/ryanwersal/nepenthe
+    description: Selective forgetfulness for macOS Time Machine
+    license: GPL-3.0
+    custom_block: |
+      depends_on :macos
+    install: |
+      bin.install "nepenthe"
+    test: |
+      system bin/"nepenthe", "version"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
