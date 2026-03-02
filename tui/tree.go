@@ -35,6 +35,7 @@ type FlatRow struct {
 	Node   *TreeNode
 	Depth  int
 	IsLeaf bool
+	Prefix string // box-drawing prefix (e.g. "├── ", "│   └── ")
 }
 
 // buildDirectoryTree builds a trie from path components, compresses single-child
@@ -157,11 +158,11 @@ func buildEcosystemTree(results []scanner.ScanResult) (*TreeNode, map[int]*TreeN
 // flattenTree walks expanded nodes depth-first into []FlatRow for virtual scrolling.
 func flattenTree(root *TreeNode) []FlatRow {
 	var rows []FlatRow
-	flattenNode(root, 0, &rows)
+	flattenNode(root, 0, nil, &rows)
 	return rows
 }
 
-func flattenNode(node *TreeNode, depth int, rows *[]FlatRow) {
+func flattenNode(node *TreeNode, depth int, ancestorIsLast []bool, rows *[]FlatRow) {
 	// Skip the virtual root node itself
 	if node.Parent != nil {
 		isLeaf := len(node.Children) == 0
@@ -169,6 +170,7 @@ func flattenNode(node *TreeNode, depth int, rows *[]FlatRow) {
 			Node:   node,
 			Depth:  depth,
 			IsLeaf: isLeaf,
+			Prefix: buildPrefix(depth, ancestorIsLast),
 		})
 	}
 
@@ -180,9 +182,42 @@ func flattenNode(node *TreeNode, depth int, rows *[]FlatRow) {
 	if node.Parent == nil {
 		childDepth = 0 // root's children start at depth 0
 	}
-	for _, child := range node.Children {
-		flattenNode(child, childDepth, rows)
+	for i, child := range node.Children {
+		isLast := i == len(node.Children)-1
+		var childAncestors []bool
+		if node.Parent != nil {
+			// Propagate ancestor state for deeper levels
+			childAncestors = append(childAncestors, ancestorIsLast...)
+			childAncestors = append(childAncestors, isLast)
+		} else {
+			// Root's children: start fresh with just this child's isLast
+			childAncestors = []bool{isLast}
+		}
+		flattenNode(child, childDepth, childAncestors, rows)
 	}
+}
+
+// buildPrefix constructs a box-drawing prefix string from ancestor info.
+func buildPrefix(depth int, ancestorIsLast []bool) string {
+	if depth == 0 || len(ancestorIsLast) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	// Continuation lines from ancestors (skip current level)
+	for i := 0; i < len(ancestorIsLast)-1; i++ {
+		if ancestorIsLast[i] {
+			b.WriteString("    ")
+		} else {
+			b.WriteString("│   ")
+		}
+	}
+	// Current level connector
+	if ancestorIsLast[len(ancestorIsLast)-1] {
+		b.WriteString("└── ")
+	} else {
+		b.WriteString("├── ")
+	}
+	return b.String()
 }
 
 // computeRollups performs a bottom-up sum of SizeBytes, FileCount, and child count.

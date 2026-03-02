@@ -22,7 +22,8 @@ archives:
 brews:
   - repository:
       owner: ryanwersal
-      name: homebrew-tap
+      name: homebrew-tools
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     name: nepenthe
     homepage: https://github.com/ryanwersal/nepenthe
     description: Selective forgetfulness for macOS Time Machine

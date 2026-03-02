@@ -7,10 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ryanwersal/nepenthe/internal/config"
 	"github.com/ryanwersal/nepenthe/internal/format"
 	"github.com/ryanwersal/nepenthe/internal/scanner"
@@ -67,6 +69,7 @@ type Model struct {
 	ctx            context.Context
 	cancelScan     context.CancelFunc
 	spinner        spinner.Model
+	help           help.Model
 	tick         int
 	width        int
 	height       int
@@ -88,6 +91,14 @@ func New() (Model, error) {
 	ch := make(chan scanner.ScanResult, 256)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	h := help.New()
+	h.Styles.ShortKey = helpKeyStyle
+	h.Styles.ShortDesc = helpDescStyle
+	h.Styles.ShortSeparator = dimStyle
+	h.Styles.FullKey = helpKeyStyle
+	h.Styles.FullDesc = helpDescStyle
+	h.Styles.FullSeparator = dimStyle
+
 	return Model{
 		phase:      phaseScanning,
 		view:       viewScan,
@@ -98,6 +109,7 @@ func New() (Model, error) {
 		cancelScan: cancel,
 		groupMode:  GroupByEcosystem,
 		spinner:    s,
+		help:       h,
 		width:      80,
 		height:     24,
 	}, nil
@@ -242,6 +254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.Width = msg.Width
 		return m, nil
 
 	case spinner.TickMsg:
@@ -950,145 +963,186 @@ func (m Model) loadAllExclusions() tea.Cmd {
 	}
 }
 
+// contentWidth returns the usable width inside the content border.
+func (m Model) contentWidth() int {
+	// Rounded border uses 1 char on each side + 1 padding on each side = 4
+	w := m.width - 4
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
+// contentHeight returns the usable height for list content.
+func (m Model) contentHeight() int {
+	// header bar(1) + status(~2) + border top/bottom(2) + footer(~2)
+	h := m.height - 7
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
 func (m Model) View() string {
+	// 1. Header bar with tabs
+	header := m.renderHeader()
+
+	// 2. Status line (view-specific)
+	status := m.renderStatus()
+
+	// 3. Content (view-specific)
+	cw := m.contentWidth()
+	ch := m.contentHeight()
+	var content string
+	switch m.view {
+	case viewScan:
+		if m.flatRows != nil {
+			content = renderTreeView(m.flatRows, m.results, m.selected, m.cursor, cw, ch)
+		} else {
+			content = renderScanView(m.results, m.selected, m.cursor, cw, ch)
+		}
+	case viewAllExclusions:
+		content = renderExclusionsView(m.exclusions, m.excCursor, cw, ch)
+	case viewSettings:
+		content = renderSettingsView(m.settingsItems, m.settingsCursor, cw, ch)
+		if m.settingsField != editNone {
+			content += "\n" + m.settingsInput.View()
+		}
+	}
+
+	// 4. Wrap content in border
+	bordered := contentBorderStyle.Width(m.width - 2).Render(content)
+
+	// 5. Footer with help keys
+	footer := m.renderFooter()
+
+	// 6. Join vertically
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		status,
+		bordered,
+		footer,
+	)
+}
+
+// renderHeader builds the full-width header bar with tab pills.
+func (m Model) renderHeader() string {
+	tabs := []struct {
+		label string
+		v     view
+	}{
+		{"Scan", viewScan},
+		{"Exclusions", viewAllExclusions},
+		{"Settings", viewSettings},
+	}
+
+	var tabParts []string
+	for _, t := range tabs {
+		if t.v == m.view {
+			tabParts = append(tabParts, activeTabStyle.Render(t.label))
+		} else {
+			tabParts = append(tabParts, inactiveTabStyle.Render(t.label))
+		}
+	}
+
+	title := headerBarStyle.Render("Nepenthe")
+	tabStr := strings.Join(tabParts, " ")
+
+	// Fill the rest of the bar width
+	barContent := title + "  " + tabStr
+	barWidth := lipgloss.Width(barContent)
+	padding := m.width - barWidth
+	if padding < 0 {
+		padding = 0
+	}
+
+	return headerBarStyle.Width(m.width).Render(
+		"Nepenthe  " + tabStr + strings.Repeat(" ", padding),
+	)
+}
+
+// renderStatus builds the view-specific status line.
+func (m Model) renderStatus() string {
 	var b strings.Builder
 
 	switch m.view {
 	case viewScan:
-		m.renderScanHeader(&b)
-		if m.flatRows != nil {
-			b.WriteString(renderTreeView(m.flatRows, m.results, m.selected, m.cursor, m.width, m.height))
-		} else {
-			b.WriteString(renderScanView(m.results, m.selected, m.cursor, m.width, m.height))
+		excludedCount := 0
+		for _, r := range m.results {
+			if r.IsExcluded {
+				excludedCount++
+			}
 		}
-		b.WriteByte('\n')
-		m.renderScanFooter(&b)
+
+		if m.phase == phaseScanning {
+			b.WriteString(m.spinner.View())
+			fmt.Fprintf(&b, " Scanning... %d found  ", m.scanCount)
+			b.WriteString(renderIndeterminateBar(20, m.tick))
+		} else {
+			b.WriteString(statusBarStyle.Render(
+				fmt.Sprintf("%d/%d excluded", excludedCount, len(m.results)),
+			))
+			if m.message != "" {
+				b.WriteString(dimStyle.Render(" — " + m.message))
+			}
+			if m.flatRows != nil {
+				switch m.groupMode {
+				case GroupByDirectory:
+					b.WriteString(dimStyle.Render("  [directory]"))
+				case GroupByEcosystem:
+					b.WriteString(dimStyle.Render("  [ecosystem]"))
+				}
+			}
+			if m.applying && m.applyTotal > 0 {
+				b.WriteByte('\n')
+				b.WriteString(m.spinner.View())
+				fmt.Fprintf(&b, " %s  ", m.applyMsg)
+				b.WriteString(renderProgressBar(30, m.applyDone, m.applyTotal))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.applyDone, m.applyTotal)))
+			}
+			if m.measuring {
+				b.WriteByte('\n')
+				b.WriteString(m.spinner.View())
+				b.WriteString(" Measuring sizes  ")
+				b.WriteString(renderProgressBar(30, m.measureCount, len(m.results)))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.measureCount, len(m.results))))
+			}
+		}
 
 	case viewAllExclusions:
-		m.renderExclusionsHeader(&b)
-		b.WriteString(renderExclusionsView(m.exclusions, m.excCursor, m.width, m.height))
-		b.WriteByte('\n')
-		m.renderExclusionsFooter(&b)
+		nepentheCount := 0
+		for _, e := range m.exclusions {
+			if e.Source == "nepenthe" {
+				nepentheCount++
+			}
+		}
+		otherCount := len(m.exclusions) - nepentheCount
+		b.WriteString(statusBarStyle.Render(
+			fmt.Sprintf("%d total (%d by Nepenthe, %d by other tools)",
+				len(m.exclusions), nepentheCount, otherCount),
+		))
 
 	case viewSettings:
-		m.renderSettingsHeader(&b)
-		b.WriteString(renderSettingsView(m.settingsItems, m.settingsCursor, m.width, m.height))
-		b.WriteByte('\n')
-		if m.settingsField != editNone {
-			b.WriteString(m.settingsInput.View())
-			b.WriteByte('\n')
+		if m.message != "" {
+			b.WriteString(dimStyle.Render(m.message))
 		}
-		m.renderSettingsFooter(&b)
 	}
 
 	return b.String()
 }
 
-func (m Model) renderScanHeader(b *strings.Builder) {
-	title := "Nepenthe"
-	if m.flatRows != nil {
-		switch m.groupMode {
-		case GroupByDirectory:
-			title += "  " + dimStyle.Render("[grouped by directory]")
-		case GroupByEcosystem:
-			title += "  " + dimStyle.Render("[grouped by ecosystem]")
+// renderFooter builds the help key footer using bubbles/help.
+func (m Model) renderFooter() string {
+	switch m.view {
+	case viewScan:
+		return m.help.View(scanKeyMap{keys})
+	case viewAllExclusions:
+		return m.help.View(exclusionsKeyMap{keys})
+	case viewSettings:
+		if m.settingsField != editNone {
+			return m.help.View(settingsEditKeyMap{})
 		}
+		return m.help.View(settingsKeyMap{keys})
 	}
-	b.WriteString(titleStyle.Render(title))
-	b.WriteByte('\n')
-
-	// Status line
-	excludedCount := 0
-	for _, r := range m.results {
-		if r.IsExcluded {
-			excludedCount++
-		}
-	}
-
-	if m.phase == phaseScanning {
-		b.WriteString(m.spinner.View())
-		fmt.Fprintf(b, " Scanning... %d found  ", m.scanCount)
-		b.WriteString(renderIndeterminateBar(20, m.tick))
-		b.WriteByte('\n')
-	} else {
-		b.WriteString(statusBarStyle.Render(
-			fmt.Sprintf("%d/%d excluded", excludedCount, len(m.results)),
-		))
-		if m.message != "" {
-			b.WriteString(dimStyle.Render(" — " + m.message))
-		}
-		b.WriteByte('\n')
-		if m.applying && m.applyTotal > 0 {
-			b.WriteString(m.spinner.View())
-			fmt.Fprintf(b, " %s  ", m.applyMsg)
-			b.WriteString(renderProgressBar(30, m.applyDone, m.applyTotal))
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.applyDone, m.applyTotal)))
-			b.WriteByte('\n')
-		}
-		if m.measuring {
-			b.WriteString(m.spinner.View())
-			b.WriteString(" Measuring sizes  ")
-			b.WriteString(renderProgressBar(30, m.measureCount, len(m.results)))
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.measureCount, len(m.results))))
-			b.WriteByte('\n')
-		}
-	}
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteByte('\n')
-}
-
-func (m Model) renderScanFooter(b *strings.Builder) {
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("j/k navigate  space toggle  a all  n none  h/l collapse/expand"))
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("enter apply   r remove      e all exclusions  g group  s settings  q quit"))
-}
-
-func (m Model) renderExclusionsHeader(b *strings.Builder) {
-	b.WriteString(titleStyle.Render("Nepenthe — All System Exclusions"))
-	b.WriteByte('\n')
-
-	nepentheCount := 0
-	for _, e := range m.exclusions {
-		if e.Source == "nepenthe" {
-			nepentheCount++
-		}
-	}
-	otherCount := len(m.exclusions) - nepentheCount
-
-	b.WriteString(statusBarStyle.Render(
-		fmt.Sprintf("%d total (%d by Nepenthe, %d by other tools)",
-			len(m.exclusions), nepentheCount, otherCount),
-	))
-	b.WriteByte('\n')
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteByte('\n')
-}
-
-func (m Model) renderExclusionsFooter(b *strings.Builder) {
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("j/k navigate  e back to scan  s settings  q quit"))
-}
-
-func (m Model) renderSettingsHeader(b *strings.Builder) {
-	b.WriteString(titleStyle.Render("Nepenthe — Settings"))
-	b.WriteByte('\n')
-	if m.message != "" {
-		b.WriteString(dimStyle.Render(m.message))
-		b.WriteByte('\n')
-	}
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteByte('\n')
-}
-
-func (m Model) renderSettingsFooter(b *strings.Builder) {
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteByte('\n')
-	if m.settingsField != editNone {
-		b.WriteString(helpStyle.Render("enter confirm  esc cancel"))
-	} else {
-		b.WriteString(helpStyle.Render("j/k navigate  space toggle  enter edit/add  d delete  s back to scan  q quit"))
-	}
+	return ""
 }

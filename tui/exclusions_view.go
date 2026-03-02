@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ryanwersal/nepenthe/internal/state"
 )
 
@@ -48,20 +49,23 @@ func renderExclusionsView(exclusions []SystemExclusion, cursor int, width, heigh
 		e := exclusions[i]
 		isCursor := i == cursor
 
-		prefix := "  "
+		accent := cursorAccentStyle
+		text := lipgloss.NewStyle()
 		if isCursor {
-			prefix = cursorStyle.Render("> ")
+			accent = withCursorBg(accent)
+			text = withCursorBg(text)
 		}
 
+		// Source tags keep their own distinct backgrounds, no cursor bg needed
 		var sourceLabel string
 		if e.Source == "nepenthe" {
-			sourceLabel = excludedStyle.Render(fmt.Sprintf("%-12s", "nepenthe"))
+			sourceLabel = nepentheTagStyle.Render("nepenthe")
 		} else {
-			sourceLabel = otherStyle.Render(fmt.Sprintf("%-12s", "other"))
+			sourceLabel = otherTagStyle.Render("other")
 		}
 
 		path := e.Path
-		maxPath := width - 18
+		maxPath := width - 20
 		if maxPath < 20 {
 			maxPath = 20
 		}
@@ -69,7 +73,15 @@ func renderExclusionsView(exclusions []SystemExclusion, cursor int, width, heigh
 			path = "…" + path[len(path)-maxPath+1:]
 		}
 
-		fmt.Fprintf(&b, "%s%s %s", prefix, sourceLabel, path)
+		var line string
+		if isCursor {
+			content := fmt.Sprintf(" %s %s %s", accent.Render("▎"), sourceLabel, text.Render(path))
+			line = padRow(content, width, true)
+		} else {
+			content := fmt.Sprintf("   %s %s", sourceLabel, path)
+			line = padRow(content, width, false)
+		}
+		b.WriteString(line)
 		if i < end-1 {
 			b.WriteByte('\n')
 		}

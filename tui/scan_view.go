@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ryanwersal/nepenthe/internal/format"
 	"github.com/ryanwersal/nepenthe/internal/scanner"
 )
@@ -33,25 +34,35 @@ func renderScanView(results []scanner.ScanResult, selected map[int]bool, cursor 
 		r := results[i]
 		isCursor := i == cursor
 
+		// Pick cursor-bg-aware styles when this is the cursor row
+		dim := dimStyle
+		sel := selectedStyle
+		exc := excludedStyle
+		eco := ecosystemStyle
+		accent := cursorAccentStyle
+		text := lipgloss.NewStyle()
+		if isCursor {
+			dim = withCursorBg(dim)
+			sel = withCursorBg(sel)
+			exc = withCursorBg(exc)
+			eco = withCursorBg(eco)
+			accent = withCursorBg(accent)
+			text = withCursorBg(text)
+		}
+
 		// Indicator
 		var indicator string
 		switch {
 		case r.IsExcluded:
-			indicator = excludedStyle.Render("✓")
+			indicator = exc.Render("✓")
 		case selected[i]:
-			indicator = selectedStyle.Render("●")
+			indicator = sel.Render("●")
 		default:
-			indicator = dimStyle.Render("○")
-		}
-
-		// Cursor prefix
-		prefix := "  "
-		if isCursor {
-			prefix = cursorStyle.Render("> ")
+			indicator = dim.Render("○")
 		}
 
 		// Ecosystem label
-		eco := ecosystemStyle.Render(r.Ecosystem)
+		ecoLabel := eco.Render(r.Ecosystem)
 
 		// Path (truncate if needed)
 		path := r.Path
@@ -73,7 +84,16 @@ func renderScanView(results []scanner.ScanResult, selected map[int]bool, cursor 
 			sizeSuffix += ")"
 		}
 
-		line := fmt.Sprintf("%s%s %s %s%s", prefix, indicator, eco, path, dimStyle.Render(sizeSuffix))
+		var line string
+		if isCursor {
+			content := fmt.Sprintf(" %s %s %s %s%s",
+				accent.Render("▎"), indicator, ecoLabel, text.Render(path), dim.Render(sizeSuffix))
+			line = padRow(content, width, true)
+		} else {
+			content := fmt.Sprintf("   %s %s %s%s",
+				indicator, ecoLabel, path, dim.Render(sizeSuffix))
+			line = padRow(content, width, false)
+		}
 		b.WriteString(line)
 		if i < end-1 {
 			b.WriteByte('\n')
@@ -109,14 +129,24 @@ func renderTreeView(flatRows []FlatRow, results []scanner.ScanResult, selected m
 		node := row.Node
 		isCursor := i == cursor
 
-		// Cursor prefix
-		prefix := "  "
+		// Pick cursor-bg-aware styles when this is the cursor row
+		dim := dimStyle
+		sel := selectedStyle
+		exc := excludedStyle
+		eco := ecosystemStyle
+		accent := cursorAccentStyle
+		text := lipgloss.NewStyle()
 		if isCursor {
-			prefix = cursorStyle.Render("> ")
+			dim = withCursorBg(dim)
+			sel = withCursorBg(sel)
+			exc = withCursorBg(exc)
+			eco = withCursorBg(eco)
+			accent = withCursorBg(accent)
+			text = withCursorBg(text)
 		}
 
-		// Indentation
-		indent := strings.Repeat("  ", row.Depth)
+		// Tree prefix with box-drawing characters
+		treePrefix := dim.Render(row.Prefix)
 
 		if row.IsLeaf {
 			// Leaf node: show indicator + ecosystem label + path basename + size
@@ -124,18 +154,18 @@ func renderTreeView(flatRows []FlatRow, results []scanner.ScanResult, selected m
 			var indicator string
 			switch {
 			case r.IsExcluded:
-				indicator = excludedStyle.Render("✓")
+				indicator = exc.Render("✓")
 			case selected[node.ResultIdx]:
-				indicator = selectedStyle.Render("●")
+				indicator = sel.Render("●")
 			default:
-				indicator = dimStyle.Render("○")
+				indicator = dim.Render("○")
 			}
 
-			eco := ecosystemStyle.Render(r.Ecosystem)
+			ecoLabel := eco.Render(r.Ecosystem)
 
 			// Show full path, truncated if needed
 			path := r.Path
-			indentWidth := row.Depth*2 + 2 + 1 + 1 + 24 + 1 // indent + prefix + indicator + space + eco width + space
+			indentWidth := lipgloss.Width(row.Prefix) + 4 + 1 + 24 + 1 // prefix + accent/space + indicator + eco width + space
 			maxPath := width - indentWidth - 1
 			if maxPath < 20 {
 				maxPath = 20
@@ -153,13 +183,24 @@ func renderTreeView(flatRows []FlatRow, results []scanner.ScanResult, selected m
 				sizeSuffix += ")"
 			}
 
-			line := fmt.Sprintf("%s%s%s %s %s%s", prefix, indent, indicator, eco, path, dimStyle.Render(sizeSuffix))
+			var line string
+			if isCursor {
+				content := fmt.Sprintf(" %s %s%s %s %s%s",
+					accent.Render("▎"), treePrefix, indicator, ecoLabel, text.Render(path), dim.Render(sizeSuffix))
+				line = padRow(content, width, true)
+			} else {
+				content := fmt.Sprintf("   %s%s %s %s%s",
+					treePrefix, indicator, ecoLabel, path, dim.Render(sizeSuffix))
+				line = padRow(content, width, false)
+			}
 			b.WriteString(line)
 		} else {
 			// Internal node: show expand arrow + label + rollup
-			arrow := "▸"
+			var arrow string
 			if node.Expanded {
-				arrow = "▾"
+				arrow = accent.Render("▾")
+			} else {
+				arrow = dim.Render("▸")
 			}
 
 			rollup := ""
@@ -170,7 +211,16 @@ func renderTreeView(flatRows []FlatRow, results []scanner.ScanResult, selected m
 				rollup = fmt.Sprintf(" (%d items)", count)
 			}
 
-			line := fmt.Sprintf("%s%s%s %s%s", prefix, indent, dimStyle.Render(arrow), node.Label, dimStyle.Render(rollup))
+			var line string
+			if isCursor {
+				content := fmt.Sprintf(" %s %s%s %s%s",
+					accent.Render("▎"), treePrefix, arrow, text.Render(node.Label), dim.Render(rollup))
+				line = padRow(content, width, true)
+			} else {
+				content := fmt.Sprintf("   %s%s %s%s",
+					treePrefix, arrow, node.Label, dim.Render(rollup))
+				line = padRow(content, width, false)
+			}
 			b.WriteString(line)
 		}
 

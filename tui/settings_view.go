@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ryanwersal/nepenthe/internal/config"
 	"github.com/ryanwersal/nepenthe/internal/scanner"
 )
@@ -67,7 +68,7 @@ func buildSettingsItems(cfg config.Config) []settingsItem {
 	}
 	items = append(items, settingsItem{
 		Kind:      settingsAddButton,
-		Label:     "[+ add root]",
+		Label:     "+ add root",
 		EditField: editRoot,
 	})
 
@@ -91,7 +92,7 @@ func buildSettingsItems(cfg config.Config) []settingsItem {
 	}
 	items = append(items, settingsItem{
 		Kind:      settingsAddButton,
-		Label:     "[+ add custom path]",
+		Label:     "+ add custom path",
 		EditField: editCustomPath,
 	})
 
@@ -141,43 +142,65 @@ func renderSettingsView(items []settingsItem, cursor int, width, height int) str
 		item := items[i]
 		isCursor := i == cursor
 
+		// Pick cursor-bg-aware styles when this is the cursor row
+		dim := dimStyle
+		exc := excludedStyle
+		accent := cursorAccentStyle
+		text := lipgloss.NewStyle()
+		if isCursor {
+			dim = withCursorBg(dim)
+			exc = withCursorBg(exc)
+			accent = withCursorBg(accent)
+			text = withCursorBg(text)
+		}
+
 		switch item.Kind {
 		case settingsHeader:
-			b.WriteString("  ")
-			b.WriteString(dimStyle.Render(item.Label))
+			content := "  " + sectionHeaderStyle.Render(item.Label)
+			b.WriteString(padRow(content, width, false))
 
 		case settingsToggle:
-			prefix := "  "
-			if isCursor {
-				prefix = cursorStyle.Render("> ")
-			}
-			check := dimStyle.Render("[ ]")
+			check := dim.Render("○")
 			if item.Enabled {
-				check = excludedStyle.Render("[x]")
+				check = exc.Render("◉")
 			}
 			label := fmt.Sprintf("%s — %s", scanner.Category(item.Value), item.Label)
-			fmt.Fprintf(&b, "%s  %s %s", prefix, check, label)
+			if isCursor {
+				content := fmt.Sprintf(" %s   %s %s", accent.Render("▎"), check, text.Render(label))
+				b.WriteString(padRow(content, width, true))
+			} else {
+				content := fmt.Sprintf("     %s %s", check, label)
+				b.WriteString(padRow(content, width, false))
+			}
 
 		case settingsPath:
-			prefix := "  "
 			if isCursor {
-				prefix = cursorStyle.Render("> ")
+				content := fmt.Sprintf(" %s   %s", accent.Render("▎"), text.Render(item.Label))
+				b.WriteString(padRow(content, width, true))
+			} else {
+				content := fmt.Sprintf("     %s", item.Label)
+				b.WriteString(padRow(content, width, false))
 			}
-			fmt.Fprintf(&b, "%s  %s", prefix, item.Label)
 
 		case settingsAddButton:
-			prefix := "  "
 			if isCursor {
-				prefix = cursorStyle.Render("> ")
+				addLabel := accent.Render("+") + dim.Render(" "+item.Label[2:])
+				content := fmt.Sprintf(" %s   %s", accent.Render("▎"), addLabel)
+				b.WriteString(padRow(content, width, true))
+			} else {
+				addLabel := cursorAccentStyle.Render("+") + dimStyle.Render(" "+item.Label[2:])
+				content := fmt.Sprintf("     %s", addLabel)
+				b.WriteString(padRow(content, width, false))
 			}
-			fmt.Fprintf(&b, "%s  %s", prefix, dimStyle.Render(item.Label))
 
 		case settingsValue:
-			prefix := "  "
 			if isCursor {
-				prefix = cursorStyle.Render("> ")
+				content := fmt.Sprintf(" %s   %s: %s", accent.Render("▎"), text.Render(item.Label), text.Render(item.Value))
+				b.WriteString(padRow(content, width, true))
+			} else {
+				content := fmt.Sprintf("     %s: %s", item.Label, item.Value)
+				b.WriteString(padRow(content, width, false))
 			}
-			fmt.Fprintf(&b, "%s  %s: %s", prefix, item.Label, item.Value)
 		}
 
 		if i < end-1 {
