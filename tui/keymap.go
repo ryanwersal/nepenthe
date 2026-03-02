@@ -11,9 +11,11 @@ type keyMap struct {
 	Apply    key.Binding
 	Remove   key.Binding
 	SwitchV  key.Binding
+	Settings key.Binding
 	Group    key.Binding
 	Expand   key.Binding
 	Collapse key.Binding
+	Delete   key.Binding
 	Quit     key.Binding
 }
 
@@ -50,9 +52,17 @@ var keys = keyMap{
 		key.WithKeys("e"),
 		key.WithHelp("e", "all exclusions"),
 	),
+	Settings: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "settings"),
+	),
 	Group: key.NewBinding(
 		key.WithKeys("g"),
 		key.WithHelp("g", "toggle grouping"),
+	),
+	Delete: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "delete"),
 	),
 	Expand: key.NewBinding(
 		key.WithKeys("l", "right"),

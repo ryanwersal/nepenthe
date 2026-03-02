@@ -3,7 +3,10 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
+	"sync"
+	"sync/atomic"
 
 	"github.com/ryanwersal/nepenthe/internal/state"
 	"github.com/ryanwersal/nepenthe/internal/tmutil"
@@ -60,22 +63,39 @@ func runReset(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	var removed, stale, failed int
+	var removed, stale int64
+	var failed int64
 	exclusions := state.ClearAll(&st)
+
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, 16)
+	)
 
 	for _, e := range exclusions {
 		if _, err := os.Stat(e.Path); os.IsNotExist(err) {
-			stale++
+			atomic.AddInt64(&stale, 1)
 			continue
 		}
-		if err := tmutil.RemoveExclusion(e.Path); err != nil {
-			failed++
-			state.AddExclusion(&st, e.Path, e.Category, e.Type, e.Ecosystem)
-			fmt.Fprintf(os.Stderr, "Failed to remove: %s\n", e.Path)
-			continue
-		}
-		removed++
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(e state.TrackedExclusion) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := tmutil.RemoveExclusion(e.Path); err != nil {
+				atomic.AddInt64(&failed, 1)
+				mu.Lock()
+				state.AddExclusion(&st, e.Path, e.Category, e.Type, e.Ecosystem)
+				mu.Unlock()
+				slog.Warn("removal failed", "path", e.Path, "err", err)
+				return
+			}
+			atomic.AddInt64(&removed, 1)
+		}(e)
 	}
+	wg.Wait()
 
 	if err := state.Save(st); err != nil {
 		return fmt.Errorf("saving state: %w", err)

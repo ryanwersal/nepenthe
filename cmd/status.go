@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/ryanwersal/nepenthe/internal/config"
 	"github.com/ryanwersal/nepenthe/internal/scanner"
@@ -31,9 +32,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading state: %w", err)
 	}
 
-	rules := scanner.BuildSentinelRules(customSentinelRules(cfg))
+	rules := scanner.BuildSentinelRules()
 
-	fmt.Println("Scanning...")
+	slog.Info("scan started")
 	sentinelResults := scanner.ScanSentinelRules(scanner.WalkOptions{
 		Roots: cfg.Roots,
 		Rules: rules,

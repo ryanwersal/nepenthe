@@ -32,14 +32,6 @@ func RemoveExclusion(path string) error {
 	return exec.Command("tmutil", "removeexclusion", path).Run()
 }
 
-func AddFixedExclusion(path string) error {
-	return exec.Command("tmutil", "addexclusion", "-p", path).Run()
-}
-
-func RemoveFixedExclusion(path string) error {
-	return exec.Command("tmutil", "removeexclusion", "-p", path).Run()
-}
-
 func ListAllExclusions() ([]string, error) {
 	out, err := exec.Command("mdfind", "com_apple_backup_excludeItem = 'com.apple.backupd'").CombinedOutput()
 	if err != nil {

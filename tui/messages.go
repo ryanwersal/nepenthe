@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/ryanwersal/nepenthe/internal/scanner"
+import (
+	"github.com/ryanwersal/nepenthe/internal/config"
+	"github.com/ryanwersal/nepenthe/internal/scanner"
+)
 
 type ScanResultMsg struct {
 	Result scanner.ScanResult
@@ -46,6 +49,11 @@ type AllSizesDoneMsg struct{}
 
 type AllExclusionsMsg struct {
 	Paths []string
+}
+
+type ConfigUpdatedMsg struct {
+	Cfg config.Config
+	Err error
 }
 
 type ErrorMsg struct {

@@ -5,11 +5,11 @@ import (
 	"os"
 )
 
-// BuildSentinelRules returns the built-in sentinel rules merged with any custom rules.
-func BuildSentinelRules(custom []SentinelRule) []SentinelRule {
-	rules := make([]SentinelRule, len(SentinelRules), len(SentinelRules)+len(custom))
+// BuildSentinelRules returns the built-in sentinel rules.
+func BuildSentinelRules() []SentinelRule {
+	rules := make([]SentinelRule, len(SentinelRules))
 	copy(rules, SentinelRules)
-	return append(rules, custom...)
+	return rules
 }
 
 var SentinelRules = []SentinelRule{

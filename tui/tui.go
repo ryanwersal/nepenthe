@@ -3,9 +3,14 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
+
+	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ryanwersal/nepenthe/internal/config"
 	"github.com/ryanwersal/nepenthe/internal/format"
@@ -27,6 +32,7 @@ type view int
 const (
 	viewScan view = iota
 	viewAllExclusions
+	viewSettings
 )
 
 type Model struct {
@@ -51,9 +57,14 @@ type Model struct {
 	treeRoot     *TreeNode
 	flatRows     []FlatRow
 	resultToNode map[int]*TreeNode
-	exclusions   []SystemExclusion
-	excCursor    int
-	spinner      spinner.Model
+	exclusions     []SystemExclusion
+	excCursor      int
+	settingsCursor int
+	settingsItems  []settingsItem
+	settingsInput  textinput.Model
+	settingsField  settingsEditField
+	settingsTmpVal string // holds first value in two-step flows (custom path)
+	spinner        spinner.Model
 	tick         int
 	width        int
 	height       int
@@ -178,15 +189,7 @@ func (m Model) startScan() tea.Cmd {
 	return func() tea.Msg {
 		defer close(ch)
 
-		custom := make([]scanner.SentinelRule, 0, len(cfg.CustomSentinelRules))
-		for _, cr := range cfg.CustomSentinelRules {
-			custom = append(custom, scanner.SentinelRule{
-				Directory: cr.Directory,
-				Sentinels: cr.Sentinels,
-				Ecosystem: cr.Ecosystem,
-			})
-		}
-		rules := scanner.BuildSentinelRules(custom)
+		rules := scanner.BuildSentinelRules()
 
 		scanner.ScanSentinelRules(scanner.WalkOptions{
 			Roots: cfg.Roots,
@@ -196,11 +199,15 @@ func (m Model) startScan() tea.Cmd {
 			},
 		})
 
-		cats := make([]scanner.Category, len(cfg.EnabledCategories))
-		for i, c := range cfg.EnabledCategories {
-			cats[i] = scanner.Category(c)
+		var customFixed []scanner.FixedPathRule
+		for _, cf := range cfg.CustomFixedPaths {
+			customFixed = append(customFixed, scanner.FixedPathRule{
+				Path:      cf.Path,
+				Ecosystem: cf.Ecosystem,
+				Category:  scanner.CategoryCustom,
+			})
 		}
-		fixedResults, err := scanner.ScanFixedPaths(cats, nil)
+		fixedResults, err := scanner.ScanFixedPaths(scanner.AllCategories, customFixed)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -327,6 +334,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.excCursor = 0
 		return m, nil
 
+	case ConfigUpdatedMsg:
+		if msg.Err != nil {
+			m.message = "Config save error: " + msg.Err.Error()
+		} else {
+			m.cfg = msg.Cfg
+			m.settingsItems = buildSettingsItems(m.cfg)
+		}
+		return m, nil
+
 	case ErrorMsg:
 		m.err = msg.Err
 		return m, tea.Quit
@@ -339,6 +355,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Settings view handles its own quit/escape logic
+	if m.view == viewSettings {
+		return m.handleSettingsKey(msg)
+	}
+
 	if key.Matches(msg, keys.Quit) {
 		return m, tea.Quit
 	}
@@ -485,6 +506,11 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.phase = phaseLoadingAll
 		m.message = "Loading all exclusions..."
 		return m, m.loadAllExclusions()
+	case key.Matches(msg, keys.Settings):
+		m.settingsItems = buildSettingsItems(m.cfg)
+		m.settingsCursor = firstSelectableIndex(m.settingsItems)
+		m.settingsField = editNone
+		m.view = viewSettings
 	}
 	return m, nil
 }
@@ -501,13 +527,217 @@ func (m Model) handleExclusionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.SwitchV):
 		m.view = viewScan
+	case key.Matches(msg, keys.Settings):
+		m.settingsItems = buildSettingsItems(m.cfg)
+		m.settingsCursor = firstSelectableIndex(m.settingsItems)
+		m.settingsField = editNone
+		m.view = viewSettings
 	}
 	return m, nil
 }
 
+func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Editing mode: forward keys to text input
+	if m.settingsField != editNone {
+		return m.handleSettingsEditKey(msg)
+	}
+
+	// Browsing mode
+	if key.Matches(msg, keys.Quit) {
+		return m, tea.Quit
+	}
+
+	switch {
+	case key.Matches(msg, keys.Down):
+		m.settingsCursor = m.nextSelectableCursor(1)
+	case key.Matches(msg, keys.Up):
+		m.settingsCursor = m.nextSelectableCursor(-1)
+
+	case key.Matches(msg, keys.Toggle):
+		// Toggle category
+		if m.settingsCursor < len(m.settingsItems) {
+			item := m.settingsItems[m.settingsCursor]
+			if item.Kind == settingsToggle {
+				return m, m.toggleCategory(item.Value)
+			}
+		}
+
+	case key.Matches(msg, keys.Apply):
+		// Enter on add button or value field -> start editing
+		if m.settingsCursor < len(m.settingsItems) {
+			item := m.settingsItems[m.settingsCursor]
+			if item.Kind == settingsAddButton {
+				m.startSettingsEdit(item.EditField, "")
+			} else if item.Kind == settingsValue {
+				m.startSettingsEdit(item.EditField, item.Value)
+			}
+		}
+
+	case key.Matches(msg, keys.Delete):
+		// Delete root or custom path
+		if m.settingsCursor < len(m.settingsItems) {
+			item := m.settingsItems[m.settingsCursor]
+			if item.Kind == settingsPath && item.Deletable {
+				return m, m.deleteSettingsItem(item)
+			}
+		}
+
+	case key.Matches(msg, keys.Settings):
+		// 's' returns to scan view
+		m.view = viewScan
+	}
+
+	// Handle esc separately since it's not in the keymap
+	if msg.Type == tea.KeyEsc {
+		m.view = viewScan
+	}
+
+	return m, nil
+}
+
+func (m Model) handleSettingsEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		// Cancel editing
+		m.settingsField = editNone
+		return m, nil
+	case tea.KeyEnter:
+		val := strings.TrimSpace(m.settingsInput.Value())
+		if val == "" {
+			m.settingsField = editNone
+			return m, nil
+		}
+		return m.confirmSettingsEdit(val)
+	}
+
+	// Forward to text input
+	var cmd tea.Cmd
+	m.settingsInput, cmd = m.settingsInput.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) startSettingsEdit(field settingsEditField, initial string) {
+	m.settingsField = field
+	ti := textinput.New()
+	switch field {
+	case editRoot:
+		ti.Placeholder = "~/path/to/scan"
+		ti.Prompt = "Root: "
+	case editCustomPath:
+		ti.Placeholder = "~/path/to/exclude"
+		ti.Prompt = "Path: "
+	case editCustomEcosystem:
+		ti.Placeholder = "e.g. Node.js"
+		ti.Prompt = "Ecosystem: "
+	case editSchedule:
+		ti.Placeholder = "86400"
+		ti.Prompt = "Interval (seconds): "
+	}
+	ti.SetValue(initial)
+	ti.Focus()
+	m.settingsInput = ti
+}
+
+func (m Model) confirmSettingsEdit(val string) (tea.Model, tea.Cmd) {
+	switch m.settingsField {
+	case editRoot:
+		m.settingsField = editNone
+		return m, m.addRoot(val)
+	case editCustomPath:
+		// Two-step: save path, prompt for ecosystem
+		m.settingsTmpVal = val
+		m.startSettingsEdit(editCustomEcosystem, "")
+		return m, nil
+	case editCustomEcosystem:
+		path := m.settingsTmpVal
+		m.settingsField = editNone
+		m.settingsTmpVal = ""
+		return m, m.addCustomFixedPath(path, val)
+	case editSchedule:
+		m.settingsField = editNone
+		secs, err := strconv.Atoi(strings.TrimSuffix(val, "s"))
+		if err != nil || secs <= 0 {
+			m.message = "Invalid interval"
+			return m, nil
+		}
+		return m, m.setScheduleInterval(secs)
+	}
+	m.settingsField = editNone
+	return m, nil
+}
+
+func (m Model) nextSelectableCursor(dir int) int {
+	c := m.settingsCursor
+	for {
+		c += dir
+		if c < 0 || c >= len(m.settingsItems) {
+			return m.settingsCursor // don't wrap
+		}
+		if m.settingsItems[c].Kind != settingsHeader {
+			return c
+		}
+	}
+}
+
+// Config mutation commands that run asynchronously and return ConfigUpdatedMsg.
+
+func (m Model) toggleCategory(category string) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.ToggleCategory(category)
+		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
+	}
+}
+
+func (m Model) addRoot(root string) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.AddRoot(root)
+		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
+	}
+}
+
+func (m Model) deleteSettingsItem(item settingsItem) tea.Cmd {
+	// Determine which section we're in by looking at preceding headers
+	section := ""
+	for i := m.settingsCursor; i >= 0; i-- {
+		if m.settingsItems[i].Kind == settingsHeader {
+			section = m.settingsItems[i].Label
+			break
+		}
+	}
+	return func() tea.Msg {
+		var cfg config.Config
+		var err error
+		switch section {
+		case "Scan Roots":
+			cfg, err = config.RemoveRoot(item.Value)
+		case "Custom Paths":
+			cfg, err = config.RemoveCustomFixedPath(item.Value)
+		}
+		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
+	}
+}
+
+func (m Model) addCustomFixedPath(path, ecosystem string) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.AddCustomFixedPath(path, ecosystem)
+		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
+	}
+}
+
+func (m Model) setScheduleInterval(secs int) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.SetScheduleInterval(secs)
+		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
+	}
+}
+
 func (m *Model) startApplyExclusions() tea.Cmd {
-	results := m.results
-	selected := m.selected
+	results := make([]scanner.ScanResult, len(m.results))
+	copy(results, m.results)
+	selected := make(map[int]bool, len(m.selected))
+	for k, v := range m.selected {
+		selected[k] = v
+	}
 
 	// Count how many we'll process
 	total := 0
@@ -529,21 +759,48 @@ func (m *Model) startApplyExclusions() tea.Cmd {
 			return nil
 		}
 
-		var applied, failed, done int
+		type successInfo struct {
+			path, category, typ, ecosystem string
+		}
+
+		var (
+			applied int64
+			failed  int64
+			done    int64
+			mu      sync.Mutex
+			wg      sync.WaitGroup
+			sem     = make(chan struct{}, 16)
+		)
+		var successes []successInfo
+
 		for i, r := range results {
 			if !selected[i] || r.IsExcluded {
 				continue
 			}
-			success := false
-			if err := tmutil.AddExclusion(r.Path); err != nil {
-				failed++
-			} else {
-				state.AddExclusion(&st, r.Path, string(r.Category), r.Type, r.Ecosystem)
-				applied++
-				success = true
-			}
-			done++
-			ch <- ApplyProgressMsg{Index: i, Success: success, Done: done, Total: total}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(idx int, r scanner.ScanResult) {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				success := false
+				if err := tmutil.AddExclusion(r.Path); err != nil {
+					atomic.AddInt64(&failed, 1)
+				} else {
+					mu.Lock()
+					successes = append(successes, successInfo{r.Path, string(r.Category), r.Type, r.Ecosystem})
+					mu.Unlock()
+					atomic.AddInt64(&applied, 1)
+					success = true
+				}
+				d := int(atomic.AddInt64(&done, 1))
+				ch <- ApplyProgressMsg{Index: idx, Success: success, Done: d, Total: total}
+			}(i, r)
+		}
+		wg.Wait()
+
+		for _, s := range successes {
+			state.AddExclusion(&st, s.path, s.category, s.typ, s.ecosystem)
 		}
 
 		if err := state.Save(st); err != nil {
@@ -551,15 +808,19 @@ func (m *Model) startApplyExclusions() tea.Cmd {
 			close(ch)
 			return nil
 		}
-		ch <- ApplyDoneMsg{Applied: applied, Failed: failed}
+		ch <- ApplyDoneMsg{Applied: int(applied), Failed: int(failed)}
 		close(ch)
 		return nil
 	}
 }
 
 func (m *Model) startRemoveExclusions() tea.Cmd {
-	results := m.results
-	selected := m.selected
+	results := make([]scanner.ScanResult, len(m.results))
+	copy(results, m.results)
+	selected := make(map[int]bool, len(m.selected))
+	for k, v := range m.selected {
+		selected[k] = v
+	}
 
 	total := 0
 	for i, r := range results {
@@ -580,21 +841,44 @@ func (m *Model) startRemoveExclusions() tea.Cmd {
 			return nil
 		}
 
-		var removed, failed, done int
+		var (
+			removed int64
+			failed  int64
+			done    int64
+			mu      sync.Mutex
+			wg      sync.WaitGroup
+			sem     = make(chan struct{}, 16)
+		)
+		var removedPaths []string
+
 		for i, r := range results {
 			if !selected[i] || !r.IsExcluded {
 				continue
 			}
-			success := false
-			if err := tmutil.RemoveExclusion(r.Path); err != nil {
-				failed++
-			} else {
-				state.RemoveExclusion(&st, r.Path)
-				removed++
-				success = true
-			}
-			done++
-			ch <- RemoveProgressMsg{Index: i, Success: success, Done: done, Total: total}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(idx int, r scanner.ScanResult) {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				success := false
+				if err := tmutil.RemoveExclusion(r.Path); err != nil {
+					atomic.AddInt64(&failed, 1)
+				} else {
+					mu.Lock()
+					removedPaths = append(removedPaths, r.Path)
+					mu.Unlock()
+					atomic.AddInt64(&removed, 1)
+					success = true
+				}
+				d := int(atomic.AddInt64(&done, 1))
+				ch <- RemoveProgressMsg{Index: idx, Success: success, Done: d, Total: total}
+			}(i, r)
+		}
+		wg.Wait()
+
+		for _, p := range removedPaths {
+			state.RemoveExclusion(&st, p)
 		}
 
 		if err := state.Save(st); err != nil {
@@ -602,7 +886,7 @@ func (m *Model) startRemoveExclusions() tea.Cmd {
 			close(ch)
 			return nil
 		}
-		ch <- RemoveDoneMsg{Removed: removed, Failed: failed}
+		ch <- RemoveDoneMsg{Removed: int(removed), Failed: int(failed)}
 		close(ch)
 		return nil
 	}
@@ -676,6 +960,16 @@ func (m Model) View() string {
 		b.WriteString(renderExclusionsView(m.exclusions, m.excCursor, m.width, m.height))
 		b.WriteByte('\n')
 		m.renderExclusionsFooter(&b)
+
+	case viewSettings:
+		m.renderSettingsHeader(&b)
+		b.WriteString(renderSettingsView(m.settingsItems, m.settingsCursor, m.width, m.height))
+		b.WriteByte('\n')
+		if m.settingsField != editNone {
+			b.WriteString(m.settingsInput.View())
+			b.WriteByte('\n')
+		}
+		m.renderSettingsFooter(&b)
 	}
 
 	return b.String()
@@ -739,7 +1033,7 @@ func (m Model) renderScanFooter(b *strings.Builder) {
 	b.WriteByte('\n')
 	b.WriteString(helpStyle.Render("j/k navigate  space toggle  a all  n none  h/l collapse/expand"))
 	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("enter apply   r remove      e all exclusions  g group  q quit"))
+	b.WriteString(helpStyle.Render("enter apply   r remove      e all exclusions  g group  s settings  q quit"))
 }
 
 func (m Model) renderExclusionsHeader(b *strings.Builder) {
@@ -766,5 +1060,26 @@ func (m Model) renderExclusionsHeader(b *strings.Builder) {
 func (m Model) renderExclusionsFooter(b *strings.Builder) {
 	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
 	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("j/k navigate  e back to scan  q quit"))
+	b.WriteString(helpStyle.Render("j/k navigate  e back to scan  s settings  q quit"))
+}
+
+func (m Model) renderSettingsHeader(b *strings.Builder) {
+	b.WriteString(titleStyle.Render("Nepenthe — Settings"))
+	b.WriteByte('\n')
+	if m.message != "" {
+		b.WriteString(dimStyle.Render(m.message))
+		b.WriteByte('\n')
+	}
+	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
+	b.WriteByte('\n')
+}
+
+func (m Model) renderSettingsFooter(b *strings.Builder) {
+	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
+	b.WriteByte('\n')
+	if m.settingsField != editNone {
+		b.WriteString(helpStyle.Render("enter confirm  esc cancel"))
+	} else {
+		b.WriteString(helpStyle.Render("j/k navigate  space toggle  enter edit/add  d delete  s back to scan  q quit"))
+	}
 }

@@ -2,8 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/ryanwersal/nepenthe/internal/config"
 	"github.com/ryanwersal/nepenthe/internal/consent"
@@ -18,7 +22,6 @@ var (
 	scanDryRun bool
 	scanSizes  bool
 	scanAll    bool
-	scanQuiet  bool
 )
 
 var scanCmd = &cobra.Command{
@@ -31,10 +34,11 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanDryRun, "dry-run", false, "Preview only, no changes")
 	scanCmd.Flags().BoolVar(&scanSizes, "sizes", false, "Measure directory sizes (slower)")
 	scanCmd.Flags().BoolVar(&scanAll, "all", false, "Skip consent prompts")
-	scanCmd.Flags().BoolVarP(&scanQuiet, "quiet", "q", false, "Suppress output except errors")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
+	scanStart := time.Now()
+
 	if err := tmutil.AssertAvailable(); err != nil {
 		return err
 	}
@@ -44,8 +48,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Build rules: built-in + custom
-	rules := scanner.BuildSentinelRules(customSentinelRules(cfg))
+	// Build rules
+	rules := scanner.BuildSentinelRules()
 
 	// Convert custom fixed paths
 	var customFixed []scanner.FixedPathRule
@@ -57,9 +61,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	if !scanQuiet {
-		fmt.Println("Scanning...")
-	}
+	slog.Info("config loaded",
+		"roots", len(cfg.Roots),
+		"rules", len(rules),
+		"categories", cfg.EnabledCategories,
+	)
+
+	slog.Info("scan started")
 
 	// Run sentinel scan
 	sentinelResults := scanner.ScanSentinelRules(scanner.WalkOptions{
@@ -67,14 +75,24 @@ func runScan(cmd *cobra.Command, args []string) error {
 		Rules: rules,
 	})
 
+	for _, r := range sentinelResults {
+		slog.Debug("sentinel match", "path", r.Path, "ecosystem", r.Ecosystem)
+	}
+
 	// Run fixed-path scan
 	fixedResults, err := scanner.ScanFixedPaths(enabledCategories(cfg), customFixed)
 	if err != nil {
 		return fmt.Errorf("scanning fixed paths: %w", err)
 	}
 
+	for _, r := range fixedResults {
+		slog.Debug("fixed path match", "path", r.Path, "ecosystem", r.Ecosystem)
+	}
+
 	// Combine results
 	results := append(sentinelResults, fixedResults...)
+
+	slog.Info("scan complete", "found", len(results), "elapsed", time.Since(scanStart))
 
 	// Filter by consent
 	if !scanAll {
@@ -97,9 +115,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Measure sizes if requested
 	if scanSizes || scanDryRun {
-		if !scanQuiet {
-			fmt.Println("Measuring sizes...")
-		}
+		slog.Info("measuring sizes")
 		results = scanner.MeasureSizes(results)
 	}
 
@@ -115,33 +131,65 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading state: %w", err)
 	}
 
-	var applied, failed int
+	type exclusionResult struct {
+		path      string
+		category  string
+		typ       string
+		ecosystem string
+	}
+
+	var (
+		applied int64
+		skipped int64
+		failed  int64
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, 16)
+	)
+	var successes []exclusionResult
+
+	slog.Info("applying exclusions", "count", len(results))
+
 	for _, r := range results {
 		if r.IsExcluded {
+			slog.Debug("exclusion skipped", "path", r.Path, "reason", "already excluded")
+			atomic.AddInt64(&skipped, 1)
 			continue
 		}
-		if err := tmutil.AddExclusion(r.Path); err != nil {
-			failed++
-			if !scanQuiet {
-				fmt.Fprintf(os.Stderr, "Failed to exclude: %s\n", r.Path)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(r scanner.ScanResult) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := tmutil.AddExclusion(r.Path); err != nil {
+				atomic.AddInt64(&failed, 1)
+				slog.Warn("exclusion failed", "path", r.Path, "err", err)
+				return
 			}
-			continue
-		}
-		state.AddExclusion(&st, r.Path, string(r.Category), r.Type, r.Ecosystem)
-		applied++
+			slog.Info("exclusion applied", "path", r.Path, "category", r.Category, "ecosystem", r.Ecosystem)
+			mu.Lock()
+			successes = append(successes, exclusionResult{r.Path, string(r.Category), r.Type, r.Ecosystem})
+			atomic.AddInt64(&applied, 1)
+			mu.Unlock()
+		}(r)
+	}
+	wg.Wait()
+
+	for _, s := range successes {
+		state.AddExclusion(&st, s.path, s.category, s.typ, s.ecosystem)
 	}
 
 	if err := state.Save(st); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	if !scanQuiet {
-		fmt.Printf("Applied %d exclusions", applied)
-		if failed > 0 {
-			fmt.Printf(" (%d failed)", failed)
-		}
-		fmt.Println()
-	}
+	slog.Info("scan finished",
+		"applied", applied,
+		"failed", failed,
+		"skipped", skipped,
+		"elapsed", time.Since(scanStart),
+	)
 
 	return nil
 }

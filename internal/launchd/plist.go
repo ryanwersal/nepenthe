@@ -55,7 +55,7 @@ func GeneratePlist(programArgs []string, intervalSeconds int) string {
 }
 
 func Install(binaryPath string, intervalSeconds int) error {
-	programArgs := []string{binaryPath, "scan", "--quiet"}
+	programArgs := []string{binaryPath, "scan", "--all", "--log-format", "json"}
 	plist := GeneratePlist(programArgs, intervalSeconds)
 
 	path, err := plistPath()

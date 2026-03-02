@@ -9,18 +9,11 @@ import (
 )
 
 type Config struct {
-	Roots               []string             `toml:"roots"`
-	EnabledCategories   []string             `toml:"enabledCategories"`
-	CustomSentinelRules []CustomSentinelRule `toml:"customSentinelRules"`
-	CustomFixedPaths    []CustomFixedPath    `toml:"customFixedPaths"`
-	Schedule            Schedule             `toml:"schedule"`
-	Consent             Consent              `toml:"consent"`
-}
-
-type CustomSentinelRule struct {
-	Directory string   `toml:"directory"`
-	Sentinels []string `toml:"sentinels"`
-	Ecosystem string   `toml:"ecosystem"`
+	Roots             []string          `toml:"roots"`
+	EnabledCategories []string          `toml:"enabledCategories"`
+	CustomFixedPaths  []CustomFixedPath `toml:"customFixedPaths"`
+	Schedule          Schedule          `toml:"schedule"`
+	Consent           Consent           `toml:"consent"`
 }
 
 type CustomFixedPath struct {
@@ -96,9 +89,6 @@ func Load() (Config, error) {
 	if len(fileCfg.EnabledCategories) > 0 {
 		cfg.EnabledCategories = fileCfg.EnabledCategories
 	}
-	if len(fileCfg.CustomSentinelRules) > 0 {
-		cfg.CustomSentinelRules = fileCfg.CustomSentinelRules
-	}
 	if len(fileCfg.CustomFixedPaths) > 0 {
 		cfg.CustomFixedPaths = fileCfg.CustomFixedPaths
 	}
@@ -165,4 +155,89 @@ func CategoryEnabled(cfg Config, category string) bool {
 		}
 	}
 	return false
+}
+
+func ToggleCategory(category string) (Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return cfg, err
+	}
+	found := false
+	for i, c := range cfg.EnabledCategories {
+		if c == category {
+			cfg.EnabledCategories = append(cfg.EnabledCategories[:i], cfg.EnabledCategories[i+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		cfg.EnabledCategories = append(cfg.EnabledCategories, category)
+	}
+	return cfg, saveConfig(cfg)
+}
+
+func AddRoot(root string) (Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return cfg, err
+	}
+	for _, r := range cfg.Roots {
+		if r == root {
+			return cfg, nil
+		}
+	}
+	cfg.Roots = append(cfg.Roots, root)
+	return cfg, saveConfig(cfg)
+}
+
+func RemoveRoot(root string) (Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return cfg, err
+	}
+	if len(cfg.Roots) <= 1 {
+		return cfg, fmt.Errorf("cannot remove last root")
+	}
+	for i, r := range cfg.Roots {
+		if r == root {
+			cfg.Roots = append(cfg.Roots[:i], cfg.Roots[i+1:]...)
+			break
+		}
+	}
+	return cfg, saveConfig(cfg)
+}
+
+func AddCustomFixedPath(path, ecosystem string) (Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return cfg, err
+	}
+	cfg.CustomFixedPaths = append(cfg.CustomFixedPaths, CustomFixedPath{
+		Path:      path,
+		Ecosystem: ecosystem,
+	})
+	return cfg, saveConfig(cfg)
+}
+
+func RemoveCustomFixedPath(path string) (Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return cfg, err
+	}
+	for i, cf := range cfg.CustomFixedPaths {
+		if cf.Path == path {
+			cfg.CustomFixedPaths = append(cfg.CustomFixedPaths[:i], cfg.CustomFixedPaths[i+1:]...)
+			break
+		}
+	}
+	return cfg, saveConfig(cfg)
+}
+
+func SetScheduleInterval(seconds int) (Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Schedule.IntervalSeconds = seconds
+	return cfg, saveConfig(cfg)
 }
