@@ -12,10 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: jdx/mise-action@v2
 
-      - run: go vet ./...
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
-      - run: go test ./...
+      - run: mise run lint
+
+      - run: mise run test

@@ -16,15 +16,14 @@ func measureConcurrency() int {
 	return max(1, runtime.NumCPU()/4)
 }
 
-func MeasureSizes(results []ScanResult) []ScanResult {
+func MeasureSizes(ctx context.Context, results []ScanResult) []ScanResult {
 	concurrency := measureConcurrency()
-	g, _ := errgroup.WithContext(context.Background())
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(concurrency)
 
 	for i := range results {
-		i := i
 		g.Go(func() error {
-			size, _ := measureDU(results[i].Path)
+			size, _ := measureDU(ctx, results[i].Path)
 			results[i].SizeBytes = size
 
 			count, _ := measureFileCount(results[i].Path)
@@ -32,7 +31,7 @@ func MeasureSizes(results []ScanResult) []ScanResult {
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 	return results
 }
 
@@ -45,15 +44,14 @@ type SizeMeasurement struct {
 
 // MeasureSizesStream measures sizes concurrently and calls onMeasured for each
 // result as it completes. This allows progressive UI updates.
-func MeasureSizesStream(results []ScanResult, onMeasured func(SizeMeasurement)) {
+func MeasureSizesStream(ctx context.Context, results []ScanResult, onMeasured func(SizeMeasurement)) {
 	concurrency := measureConcurrency()
-	g, _ := errgroup.WithContext(context.Background())
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(concurrency)
 
 	for i := range results {
-		i := i
 		g.Go(func() error {
-			size, _ := measureDU(results[i].Path)
+			size, _ := measureDU(ctx, results[i].Path)
 			count, _ := measureFileCount(results[i].Path)
 			onMeasured(SizeMeasurement{
 				Index:     i,
@@ -63,11 +61,11 @@ func MeasureSizesStream(results []ScanResult, onMeasured func(SizeMeasurement)) 
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 }
 
-func measureDU(path string) (int64, error) {
-	out, err := exec.Command("du", "-sk", path).Output()
+func measureDU(ctx context.Context, path string) (int64, error) {
+	out, err := exec.CommandContext(ctx, "du", "-sk", path).Output()
 	if err != nil {
 		return 0, err
 	}

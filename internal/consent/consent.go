@@ -31,7 +31,7 @@ func CheckCategoryConsent(category string, cfg config.Config, w io.Writer) (bool
 		return false, nil
 	}
 
-	fmt.Fprintf(w, "%s: %s\nExclude these paths? [y/N] ", category, label)
+	_, _ = fmt.Fprintf(w, "%s: %s\nExclude these paths? [y/N] ", category, label)
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
@@ -42,7 +42,7 @@ func CheckCategoryConsent(category string, cfg config.Config, w io.Writer) (bool
 	_, err = os.Stdin.Read(buf)
 
 	// Restore terminal before handling error or printing
-	term.Restore(int(os.Stdin.Fd()), oldState)
+	_ = term.Restore(int(os.Stdin.Fd()), oldState)
 
 	if err != nil {
 		return false, err
@@ -51,9 +51,9 @@ func CheckCategoryConsent(category string, cfg config.Config, w io.Writer) (bool
 	answer := buf[0] == 'y' || buf[0] == 'Y'
 
 	if answer {
-		fmt.Fprintf(w, "y\n%s enabled.\n", category)
+		_, _ = fmt.Fprintf(w, "y\n%s enabled.\n", category)
 	} else {
-		fmt.Fprintf(w, "n\n%s skipped.\n", category)
+		_, _ = fmt.Fprintf(w, "n\n%s skipped.\n", category)
 	}
 
 	if err := config.SaveConsent(category, answer); err != nil {

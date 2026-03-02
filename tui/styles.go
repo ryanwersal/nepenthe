@@ -16,7 +16,6 @@ var (
 	ecosystemStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(24)
 	helpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	statusBarStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	errorStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red
 	dividerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 	progressFillStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))  // light blue (matches indeterminate)
 	progressBgStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))

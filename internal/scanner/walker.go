@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,7 +10,7 @@ import (
 	"github.com/ryanwersal/nepenthe/internal/tmutil"
 )
 
-func ScanSentinelRules(opts WalkOptions) []ScanResult {
+func ScanSentinelRules(ctx context.Context, opts WalkOptions) []ScanResult {
 	concurrency := max(2, runtime.NumCPU()/2)
 
 	// Build sentinel index: sentinel filename -> []SentinelRule
@@ -43,6 +44,9 @@ func ScanSentinelRules(opts WalkOptions) []ScanResult {
 
 	var processDir func(dir string)
 	processDir = func(dir string) {
+		if ctx.Err() != nil {
+			return
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return
@@ -118,7 +122,7 @@ func ScanSentinelRules(opts WalkOptions) []ScanResult {
 	return results
 }
 
-func ScanFixedPaths(enabledCategories []Category, customPaths []FixedPathRule) ([]ScanResult, error) {
+func ScanFixedPaths(ctx context.Context, enabledCategories []Category, customPaths []FixedPathRule) ([]ScanResult, error) {
 	categories, err := FixedPathCategories()
 	if err != nil {
 		return nil, err

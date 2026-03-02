@@ -257,10 +257,7 @@ func splitPath(path string) []string {
 	if path == "/" {
 		return nil
 	}
-	// Remove leading /
-	if strings.HasPrefix(path, "/") {
-		path = path[1:]
-	}
+	path = strings.TrimPrefix(path, "/")
 	return strings.Split(path, "/")
 }
 

@@ -69,7 +69,7 @@ func renderExclusionsView(exclusions []SystemExclusion, cursor int, width, heigh
 			path = "…" + path[len(path)-maxPath+1:]
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s %s", prefix, sourceLabel, path))
+		fmt.Fprintf(&b, "%s%s %s", prefix, sourceLabel, path)
 		if i < end-1 {
 			b.WriteByte('\n')
 		}

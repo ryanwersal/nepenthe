@@ -2,9 +2,12 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -37,7 +40,7 @@ func Load() (State, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return s, nil
 		}
 		return s, err
@@ -103,10 +106,7 @@ func ClearAll(s *State) []TrackedExclusion {
 }
 
 func IsTracked(s *State, path string) bool {
-	for _, e := range s.Exclusions {
-		if e.Path == path {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(s.Exclusions, func(e TrackedExclusion) bool {
+		return e.Path == path
+	})
 }

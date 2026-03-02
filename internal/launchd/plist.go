@@ -1,7 +1,9 @@
 package launchd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,14 +87,14 @@ func Uninstall() error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("no plist found at %s", path)
 	}
 
 	// Use bootout (the modern replacement for deprecated "launchctl unload")
 	// Ignore errors since the service may not be loaded
 	uid := fmt.Sprintf("gui/%d", os.Getuid())
-	exec.Command("launchctl", "bootout", uid, path).Run()
+	_ = exec.Command("launchctl", "bootout", uid, path).Run()
 
 	return os.Remove(path)
 }

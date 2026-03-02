@@ -1,0 +1,31 @@
+[tools]
+go = "1.26.0"
+golangci-lint = "2.10.1"
+
+[tasks.build]
+description = "Build nepenthe binary to dist/"
+run = """
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS="-s -w -X github.com/ryanwersal/nepenthe/cmd.version=${VERSION} -X github.com/ryanwersal/nepenthe/cmd.commit=${COMMIT} -X github.com/ryanwersal/nepenthe/cmd.date=${DATE}"
+mkdir -p dist
+go build -ldflags "${LDFLAGS}" -o dist/nepenthe .
+"""
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.clean]
+description = "Remove dist/"
+run = "rm -rf dist"
+
+[tasks.install]
+description = "Install nepenthe to /usr/local/bin"
+depends = ["build"]
+run = "cp dist/nepenthe /usr/local/bin/nepenthe"

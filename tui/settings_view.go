@@ -37,30 +37,20 @@ type settingsItem struct {
 	EditField settingsEditField
 }
 
-// allSettingsCategories lists categories shown in settings (excluding "custom" which is
-// managed via custom fixed paths).
-var allSettingsCategories = []struct {
-	Name  string
-	Label string
-}{
-	{"dependencies", "Build dependencies"},
-	{"dev-caches", "Developer caches"},
-	{"containers", "Containers"},
-	{"vms", "Virtual machines"},
-	{"optional", "Optional"},
-}
-
 func buildSettingsItems(cfg config.Config) []settingsItem {
 	var items []settingsItem
 
 	// Categories section
 	items = append(items, settingsItem{Kind: settingsHeader, Label: "Categories"})
-	for _, cat := range allSettingsCategories {
-		enabled := config.CategoryEnabled(cfg, cat.Name)
+	for _, cat := range scanner.AllCategories {
+		if cat == scanner.CategoryCustom {
+			continue
+		}
+		enabled := config.CategoryEnabled(cfg, string(cat))
 		items = append(items, settingsItem{
 			Kind:    settingsToggle,
-			Label:   cat.Label,
-			Value:   cat.Name,
+			Label:   scanner.CategoryLabel[cat],
+			Value:   string(cat),
 			Enabled: enabled,
 		})
 	}
@@ -166,28 +156,28 @@ func renderSettingsView(items []settingsItem, cursor int, width, height int) str
 				check = excludedStyle.Render("[x]")
 			}
 			label := fmt.Sprintf("%s — %s", scanner.Category(item.Value), item.Label)
-			b.WriteString(fmt.Sprintf("%s  %s %s", prefix, check, label))
+			fmt.Fprintf(&b, "%s  %s %s", prefix, check, label)
 
 		case settingsPath:
 			prefix := "  "
 			if isCursor {
 				prefix = cursorStyle.Render("> ")
 			}
-			b.WriteString(fmt.Sprintf("%s  %s", prefix, item.Label))
+			fmt.Fprintf(&b, "%s  %s", prefix, item.Label)
 
 		case settingsAddButton:
 			prefix := "  "
 			if isCursor {
 				prefix = cursorStyle.Render("> ")
 			}
-			b.WriteString(fmt.Sprintf("%s  %s", prefix, dimStyle.Render(item.Label)))
+			fmt.Fprintf(&b, "%s  %s", prefix, dimStyle.Render(item.Label))
 
 		case settingsValue:
 			prefix := "  "
 			if isCursor {
 				prefix = cursorStyle.Render("> ")
 			}
-			b.WriteString(fmt.Sprintf("%s  %s: %s", prefix, item.Label, item.Value))
+			fmt.Fprintf(&b, "%s  %s: %s", prefix, item.Label, item.Value)
 		}
 
 		if i < end-1 {

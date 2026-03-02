@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ryanwersal/nepenthe/internal/config"
@@ -16,6 +15,7 @@ import (
 	"github.com/ryanwersal/nepenthe/internal/state"
 	"github.com/ryanwersal/nepenthe/internal/tmutil"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -67,10 +67,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 		"categories", cfg.EnabledCategories,
 	)
 
+	ctx := cmd.Context()
 	slog.Info("scan started")
 
 	// Run sentinel scan
-	sentinelResults := scanner.ScanSentinelRules(scanner.WalkOptions{
+	sentinelResults := scanner.ScanSentinelRules(ctx, scanner.WalkOptions{
 		Roots: cfg.Roots,
 		Rules: rules,
 	})
@@ -80,7 +81,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run fixed-path scan
-	fixedResults, err := scanner.ScanFixedPaths(enabledCategories(cfg), customFixed)
+	fixedResults, err := scanner.ScanFixedPaths(ctx, enabledCategories(cfg), customFixed)
 	if err != nil {
 		return fmt.Errorf("scanning fixed paths: %w", err)
 	}
@@ -90,7 +91,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Combine results
-	results := append(sentinelResults, fixedResults...)
+	results := make([]scanner.ScanResult, 0, len(sentinelResults)+len(fixedResults))
+	results = append(results, sentinelResults...)
+	results = append(results, fixedResults...)
 
 	slog.Info("scan complete", "found", len(results), "elapsed", time.Since(scanStart))
 
@@ -116,7 +119,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Measure sizes if requested
 	if scanSizes || scanDryRun {
 		slog.Info("measuring sizes")
-		results = scanner.MeasureSizes(results)
+		results = scanner.MeasureSizes(ctx, results)
 	}
 
 	// Dry run: print table and exit
@@ -139,42 +142,39 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	var (
-		applied int64
-		skipped int64
-		failed  int64
+		skipped int
 		mu      sync.Mutex
-		wg      sync.WaitGroup
-		sem     = make(chan struct{}, 16)
 	)
 	var successes []exclusionResult
+	var failed int
 
 	slog.Info("applying exclusions", "count", len(results))
+
+	g := new(errgroup.Group)
+	g.SetLimit(16)
 
 	for _, r := range results {
 		if r.IsExcluded {
 			slog.Debug("exclusion skipped", "path", r.Path, "reason", "already excluded")
-			atomic.AddInt64(&skipped, 1)
+			skipped++
 			continue
 		}
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(r scanner.ScanResult) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
+		g.Go(func() error {
 			if err := tmutil.AddExclusion(r.Path); err != nil {
-				atomic.AddInt64(&failed, 1)
+				mu.Lock()
+				failed++
+				mu.Unlock()
 				slog.Warn("exclusion failed", "path", r.Path, "err", err)
-				return
+				return nil
 			}
 			slog.Info("exclusion applied", "path", r.Path, "category", r.Category, "ecosystem", r.Ecosystem)
 			mu.Lock()
 			successes = append(successes, exclusionResult{r.Path, string(r.Category), r.Type, r.Ecosystem})
-			atomic.AddInt64(&applied, 1)
 			mu.Unlock()
-		}(r)
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 
 	for _, s := range successes {
 		state.AddExclusion(&st, s.path, s.category, s.typ, s.ecosystem)
@@ -184,6 +184,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	applied := len(successes)
 	slog.Info("scan finished",
 		"applied", applied,
 		"failed", failed,

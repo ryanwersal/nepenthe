@@ -35,11 +35,12 @@ func renderScanView(results []scanner.ScanResult, selected map[int]bool, cursor 
 
 		// Indicator
 		var indicator string
-		if r.IsExcluded {
+		switch {
+		case r.IsExcluded:
 			indicator = excludedStyle.Render("✓")
-		} else if selected[i] {
+		case selected[i]:
 			indicator = selectedStyle.Render("●")
-		} else {
+		default:
 			indicator = dimStyle.Render("○")
 		}
 
@@ -121,11 +122,12 @@ func renderTreeView(flatRows []FlatRow, results []scanner.ScanResult, selected m
 			// Leaf node: show indicator + ecosystem label + path basename + size
 			r := results[node.ResultIdx]
 			var indicator string
-			if r.IsExcluded {
+			switch {
+			case r.IsExcluded:
 				indicator = excludedStyle.Render("✓")
-			} else if selected[node.ResultIdx] {
+			case selected[node.ResultIdx]:
 				indicator = selectedStyle.Render("●")
-			} else {
+			default:
 				indicator = dimStyle.Render("○")
 			}
 

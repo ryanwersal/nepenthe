@@ -32,18 +32,21 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading state: %w", err)
 	}
 
+	ctx := cmd.Context()
 	rules := scanner.BuildSentinelRules()
 
 	slog.Info("scan started")
-	sentinelResults := scanner.ScanSentinelRules(scanner.WalkOptions{
+	sentinelResults := scanner.ScanSentinelRules(ctx, scanner.WalkOptions{
 		Roots: cfg.Roots,
 		Rules: rules,
 	})
-	fixedResults, err := scanner.ScanFixedPaths(enabledCategories(cfg), nil)
+	fixedResults, err := scanner.ScanFixedPaths(ctx, enabledCategories(cfg), nil)
 	if err != nil {
 		return fmt.Errorf("scanning fixed paths: %w", err)
 	}
-	results := append(sentinelResults, fixedResults...)
+	results := make([]scanner.ScanResult, 0, len(sentinelResults)+len(fixedResults))
+	results = append(results, sentinelResults...)
+	results = append(results, fixedResults...)
 
 	var byNepenthe, byOther, notExcluded []scanner.ScanResult
 	for _, r := range results {

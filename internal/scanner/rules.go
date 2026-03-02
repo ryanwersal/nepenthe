@@ -7,12 +7,12 @@ import (
 
 // BuildSentinelRules returns the built-in sentinel rules.
 func BuildSentinelRules() []SentinelRule {
-	rules := make([]SentinelRule, len(SentinelRules))
-	copy(rules, SentinelRules)
+	rules := make([]SentinelRule, len(sentinelRules))
+	copy(rules, sentinelRules)
 	return rules
 }
 
-var SentinelRules = []SentinelRule{
+var sentinelRules = []SentinelRule{
 	{Directory: "node_modules", Sentinels: []string{"package.json"}, Ecosystem: "Node.js"},
 	{Directory: ".parcel-cache", Sentinels: []string{"package.json"}, Ecosystem: "Node.js (Parcel)"},
 	{Directory: "vendor", Sentinels: []string{"composer.json"}, Ecosystem: "PHP (Composer)"},

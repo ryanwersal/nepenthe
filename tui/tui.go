@@ -1,12 +1,11 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
-
-	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -17,6 +16,7 @@ import (
 	"github.com/ryanwersal/nepenthe/internal/scanner"
 	"github.com/ryanwersal/nepenthe/internal/state"
 	"github.com/ryanwersal/nepenthe/internal/tmutil"
+	"golang.org/x/sync/errgroup"
 )
 
 type phase int
@@ -64,6 +64,8 @@ type Model struct {
 	settingsInput  textinput.Model
 	settingsField  settingsEditField
 	settingsTmpVal string // holds first value in two-step flows (custom path)
+	ctx            context.Context
+	cancelScan     context.CancelFunc
 	spinner        spinner.Model
 	tick         int
 	width        int
@@ -84,17 +86,20 @@ func New() (Model, error) {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	ch := make(chan scanner.ScanResult, 256)
+	ctx, cancel := context.WithCancel(context.Background())
 
 	return Model{
-		phase:     phaseScanning,
-		view:      viewScan,
-		cfg:       cfg,
-		selected:  make(map[int]bool),
-		scanCh:    ch,
-		groupMode: GroupByEcosystem,
-		spinner:   s,
-		width:     80,
-		height:    24,
+		phase:      phaseScanning,
+		view:       viewScan,
+		cfg:        cfg,
+		selected:   make(map[int]bool),
+		scanCh:     ch,
+		ctx:        ctx,
+		cancelScan: cancel,
+		groupMode:  GroupByEcosystem,
+		spinner:    s,
+		width:      80,
+		height:     24,
 	}, nil
 }
 
@@ -186,12 +191,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) startScan() tea.Cmd {
 	ch := m.scanCh
 	cfg := m.cfg
+	ctx := m.ctx
 	return func() tea.Msg {
 		defer close(ch)
 
 		rules := scanner.BuildSentinelRules()
 
-		scanner.ScanSentinelRules(scanner.WalkOptions{
+		scanner.ScanSentinelRules(ctx, scanner.WalkOptions{
 			Roots: cfg.Roots,
 			Rules: rules,
 			OnFound: func(r scanner.ScanResult) {
@@ -207,7 +213,7 @@ func (m Model) startScan() tea.Cmd {
 				Category:  scanner.CategoryCustom,
 			})
 		}
-		fixedResults, err := scanner.ScanFixedPaths(scanner.AllCategories, customFixed)
+		fixedResults, err := scanner.ScanFixedPaths(ctx, scanner.AllCategories, customFixed)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -361,6 +367,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if key.Matches(msg, keys.Quit) {
+		if m.cancelScan != nil {
+			m.cancelScan()
+		}
 		return m, tea.Quit
 	}
 
@@ -440,16 +449,7 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				// Toggle all descendant leaves
 				indices := leafIndices(row.Node)
-				// Check if all are selected
 				allSelected := true
-				for _, idx := range indices {
-					if !m.selected[idx] {
-						allSelected = true
-						break
-					}
-				}
-				// If checking properly: see if all non-excluded are selected
-				allSelected = true
 				for _, idx := range indices {
 					if !m.results[idx].IsExcluded && !m.selected[idx] {
 						allSelected = false
@@ -544,6 +544,9 @@ func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Browsing mode
 	if key.Matches(msg, keys.Quit) {
+		if m.cancelScan != nil {
+			m.cancelScan()
+		}
 		return m, tea.Quit
 	}
 
@@ -566,9 +569,10 @@ func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter on add button or value field -> start editing
 		if m.settingsCursor < len(m.settingsItems) {
 			item := m.settingsItems[m.settingsCursor]
-			if item.Kind == settingsAddButton {
+			switch item.Kind {
+			case settingsAddButton:
 				m.startSettingsEdit(item.EditField, "")
-			} else if item.Kind == settingsValue {
+			case settingsValue:
 				m.startSettingsEdit(item.EditField, item.Value)
 			}
 		}
@@ -764,40 +768,42 @@ func (m *Model) startApplyExclusions() tea.Cmd {
 		}
 
 		var (
-			applied int64
-			failed  int64
-			done    int64
-			mu      sync.Mutex
-			wg      sync.WaitGroup
-			sem     = make(chan struct{}, 16)
+			mu        sync.Mutex
+			done      int
+			failed    int
+			successes []successInfo
 		)
-		var successes []successInfo
+
+		g := new(errgroup.Group)
+		g.SetLimit(16)
 
 		for i, r := range results {
 			if !selected[i] || r.IsExcluded {
 				continue
 			}
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(idx int, r scanner.ScanResult) {
-				defer wg.Done()
-				defer func() { <-sem }()
-
+			idx := i
+			g.Go(func() error {
 				success := false
 				if err := tmutil.AddExclusion(r.Path); err != nil {
-					atomic.AddInt64(&failed, 1)
+					mu.Lock()
+					failed++
+					done++
+					d := done
+					mu.Unlock()
+					ch <- ApplyProgressMsg{Index: idx, Success: false, Done: d, Total: total}
 				} else {
 					mu.Lock()
 					successes = append(successes, successInfo{r.Path, string(r.Category), r.Type, r.Ecosystem})
+					done++
+					d := done
 					mu.Unlock()
-					atomic.AddInt64(&applied, 1)
 					success = true
+					ch <- ApplyProgressMsg{Index: idx, Success: success, Done: d, Total: total}
 				}
-				d := int(atomic.AddInt64(&done, 1))
-				ch <- ApplyProgressMsg{Index: idx, Success: success, Done: d, Total: total}
-			}(i, r)
+				return nil
+			})
 		}
-		wg.Wait()
+		_ = g.Wait()
 
 		for _, s := range successes {
 			state.AddExclusion(&st, s.path, s.category, s.typ, s.ecosystem)
@@ -808,7 +814,7 @@ func (m *Model) startApplyExclusions() tea.Cmd {
 			close(ch)
 			return nil
 		}
-		ch <- ApplyDoneMsg{Applied: int(applied), Failed: int(failed)}
+		ch <- ApplyDoneMsg{Applied: len(successes), Failed: failed}
 		close(ch)
 		return nil
 	}
@@ -842,40 +848,42 @@ func (m *Model) startRemoveExclusions() tea.Cmd {
 		}
 
 		var (
-			removed int64
-			failed  int64
-			done    int64
-			mu      sync.Mutex
-			wg      sync.WaitGroup
-			sem     = make(chan struct{}, 16)
+			mu           sync.Mutex
+			done         int
+			failed       int
+			removedPaths []string
 		)
-		var removedPaths []string
+
+		g := new(errgroup.Group)
+		g.SetLimit(16)
 
 		for i, r := range results {
 			if !selected[i] || !r.IsExcluded {
 				continue
 			}
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(idx int, r scanner.ScanResult) {
-				defer wg.Done()
-				defer func() { <-sem }()
-
+			idx := i
+			g.Go(func() error {
 				success := false
 				if err := tmutil.RemoveExclusion(r.Path); err != nil {
-					atomic.AddInt64(&failed, 1)
+					mu.Lock()
+					failed++
+					done++
+					d := done
+					mu.Unlock()
+					ch <- RemoveProgressMsg{Index: idx, Success: false, Done: d, Total: total}
 				} else {
 					mu.Lock()
 					removedPaths = append(removedPaths, r.Path)
+					done++
+					d := done
 					mu.Unlock()
-					atomic.AddInt64(&removed, 1)
 					success = true
+					ch <- RemoveProgressMsg{Index: idx, Success: success, Done: d, Total: total}
 				}
-				d := int(atomic.AddInt64(&done, 1))
-				ch <- RemoveProgressMsg{Index: idx, Success: success, Done: d, Total: total}
-			}(i, r)
+				return nil
+			})
 		}
-		wg.Wait()
+		_ = g.Wait()
 
 		for _, p := range removedPaths {
 			state.RemoveExclusion(&st, p)
@@ -886,7 +894,7 @@ func (m *Model) startRemoveExclusions() tea.Cmd {
 			close(ch)
 			return nil
 		}
-		ch <- RemoveDoneMsg{Removed: int(removed), Failed: int(failed)}
+		ch <- RemoveDoneMsg{Removed: len(removedPaths), Failed: failed}
 		close(ch)
 		return nil
 	}
@@ -907,8 +915,9 @@ func (m Model) startMeasure() tea.Cmd {
 	results := make([]scanner.ScanResult, len(m.results))
 	copy(results, m.results)
 	ch := m.measureCh
+	ctx := m.ctx
 	return func() tea.Msg {
-		scanner.MeasureSizesStream(results, func(sm scanner.SizeMeasurement) {
+		scanner.MeasureSizesStream(ctx, results, func(sm scanner.SizeMeasurement) {
 			ch <- SizeMeasuredMsg{
 				Index:     sm.Index,
 				SizeBytes: sm.SizeBytes,
@@ -998,7 +1007,7 @@ func (m Model) renderScanHeader(b *strings.Builder) {
 
 	if m.phase == phaseScanning {
 		b.WriteString(m.spinner.View())
-		b.WriteString(fmt.Sprintf(" Scanning... %d found  ", m.scanCount))
+		fmt.Fprintf(b, " Scanning... %d found  ", m.scanCount)
 		b.WriteString(renderIndeterminateBar(20, m.tick))
 		b.WriteByte('\n')
 	} else {
@@ -1011,14 +1020,14 @@ func (m Model) renderScanHeader(b *strings.Builder) {
 		b.WriteByte('\n')
 		if m.applying && m.applyTotal > 0 {
 			b.WriteString(m.spinner.View())
-			b.WriteString(fmt.Sprintf(" %s  ", m.applyMsg))
+			fmt.Fprintf(b, " %s  ", m.applyMsg)
 			b.WriteString(renderProgressBar(30, m.applyDone, m.applyTotal))
 			b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.applyDone, m.applyTotal)))
 			b.WriteByte('\n')
 		}
 		if m.measuring {
 			b.WriteString(m.spinner.View())
-			b.WriteString(fmt.Sprintf(" Measuring sizes  "))
+			b.WriteString(" Measuring sizes  ")
 			b.WriteString(renderProgressBar(30, m.measureCount, len(m.results)))
 			b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.measureCount, len(m.results))))
 			b.WriteByte('\n')

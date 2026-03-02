@@ -1,9 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/BurntSushi/toml"
 )
@@ -71,7 +74,7 @@ func Load() (Config, error) {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return cfg, nil
 		}
 		return cfg, err
@@ -131,30 +134,25 @@ func saveConfig(cfg Config) error {
 	}
 
 	tmp := cfgPath + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
 
 	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, cfgPath)
 }
 
 func CategoryEnabled(cfg Config, category string) bool {
-	for _, c := range cfg.EnabledCategories {
-		if c == category {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cfg.EnabledCategories, category)
 }
 
 func ToggleCategory(category string) (Config, error) {

@@ -2,15 +2,17 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ryanwersal/nepenthe/internal/state"
 	"github.com/ryanwersal/nepenthe/internal/tmutil"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -63,39 +65,35 @@ func runReset(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	var removed, stale int64
-	var failed int64
+	var stale, removed, failed int
 	exclusions := state.ClearAll(&st)
 
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, 16)
-	)
+	var mu sync.Mutex
+
+	g := new(errgroup.Group)
+	g.SetLimit(16)
 
 	for _, e := range exclusions {
-		if _, err := os.Stat(e.Path); os.IsNotExist(err) {
-			atomic.AddInt64(&stale, 1)
+		if _, err := os.Stat(e.Path); errors.Is(err, fs.ErrNotExist) {
+			stale++
 			continue
 		}
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(e state.TrackedExclusion) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
+		g.Go(func() error {
 			if err := tmutil.RemoveExclusion(e.Path); err != nil {
-				atomic.AddInt64(&failed, 1)
 				mu.Lock()
+				failed++
 				state.AddExclusion(&st, e.Path, e.Category, e.Type, e.Ecosystem)
 				mu.Unlock()
 				slog.Warn("removal failed", "path", e.Path, "err", err)
-				return
+				return nil
 			}
-			atomic.AddInt64(&removed, 1)
-		}(e)
+			mu.Lock()
+			removed++
+			mu.Unlock()
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 
 	if err := state.Save(st); err != nil {
 		return fmt.Errorf("saving state: %w", err)
