@@ -5,16 +5,19 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
 )
 
-func MeasureSizes(results []ScanResult, concurrency int) []ScanResult {
-	if concurrency <= 0 {
-		concurrency = 4
-	}
+func measureConcurrency() int {
+	return max(1, runtime.NumCPU()/4)
+}
+
+func MeasureSizes(results []ScanResult) []ScanResult {
+	concurrency := measureConcurrency()
 	g, _ := errgroup.WithContext(context.Background())
 	g.SetLimit(concurrency)
 
@@ -42,10 +45,8 @@ type SizeMeasurement struct {
 
 // MeasureSizesStream measures sizes concurrently and calls onMeasured for each
 // result as it completes. This allows progressive UI updates.
-func MeasureSizesStream(results []ScanResult, concurrency int, onMeasured func(SizeMeasurement)) {
-	if concurrency <= 0 {
-		concurrency = 4
-	}
+func MeasureSizesStream(results []ScanResult, onMeasured func(SizeMeasurement)) {
+	concurrency := measureConcurrency()
 	g, _ := errgroup.WithContext(context.Background())
 	g.SetLimit(concurrency)
 

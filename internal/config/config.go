@@ -9,18 +9,12 @@ import (
 )
 
 type Config struct {
-	Roots                []string             `toml:"roots"`
-	EnabledTiers         []int                `toml:"enabledTiers"`
-	CustomSentinelRules  []CustomSentinelRule `toml:"customSentinelRules"`
-	CustomFixedPaths     []CustomFixedPath    `toml:"customFixedPaths"`
-	Schedule             Schedule             `toml:"schedule"`
-	Consent              Consent              `toml:"consent"`
-	Concurrency          Concurrency          `toml:"concurrency"`
-}
-
-type Concurrency struct {
-	ScanWorkers    int `toml:"scanWorkers"`
-	MeasureWorkers int `toml:"measureWorkers"`
+	Roots               []string             `toml:"roots"`
+	EnabledCategories   []string             `toml:"enabledCategories"`
+	CustomSentinelRules []CustomSentinelRule `toml:"customSentinelRules"`
+	CustomFixedPaths    []CustomFixedPath    `toml:"customFixedPaths"`
+	Schedule            Schedule             `toml:"schedule"`
+	Consent             Consent              `toml:"consent"`
 }
 
 type CustomSentinelRule struct {
@@ -40,8 +34,7 @@ type Schedule struct {
 }
 
 type Consent struct {
-	Tier2 *bool `toml:"tier2"`
-	Tier3 *bool `toml:"tier3"`
+	Categories map[string]bool `toml:"categories"`
 }
 
 func configDir() (string, error) {
@@ -66,10 +59,9 @@ func DefaultConfig() (Config, error) {
 		return Config{}, fmt.Errorf("resolving home directory: %w", err)
 	}
 	return Config{
-		Roots:        []string{home},
-		EnabledTiers: []int{1, 2, 3},
-		Schedule:     Schedule{IntervalSeconds: 86400},
-		Concurrency:  Concurrency{ScanWorkers: 8, MeasureWorkers: 4},
+		Roots:             []string{home},
+		EnabledCategories: []string{"dependencies", "dev-caches", "containers"},
+		Schedule:          Schedule{IntervalSeconds: 86400},
 	}, nil
 }
 
@@ -101,8 +93,8 @@ func Load() (Config, error) {
 	if len(fileCfg.Roots) > 0 {
 		cfg.Roots = fileCfg.Roots
 	}
-	if len(fileCfg.EnabledTiers) > 0 {
-		cfg.EnabledTiers = fileCfg.EnabledTiers
+	if len(fileCfg.EnabledCategories) > 0 {
+		cfg.EnabledCategories = fileCfg.EnabledCategories
 	}
 	if len(fileCfg.CustomSentinelRules) > 0 {
 		cfg.CustomSentinelRules = fileCfg.CustomSentinelRules
@@ -113,29 +105,23 @@ func Load() (Config, error) {
 	if fileCfg.Schedule.IntervalSeconds > 0 {
 		cfg.Schedule.IntervalSeconds = fileCfg.Schedule.IntervalSeconds
 	}
-	cfg.Consent = fileCfg.Consent
-	if fileCfg.Concurrency.ScanWorkers > 0 {
-		cfg.Concurrency.ScanWorkers = fileCfg.Concurrency.ScanWorkers
-	}
-	if fileCfg.Concurrency.MeasureWorkers > 0 {
-		cfg.Concurrency.MeasureWorkers = fileCfg.Concurrency.MeasureWorkers
+	if len(fileCfg.Consent.Categories) > 0 {
+		cfg.Consent.Categories = fileCfg.Consent.Categories
 	}
 
 	return cfg, nil
 }
 
-func SaveConsent(tier int, value bool) error {
+func SaveConsent(category string, value bool) error {
 	cfg, err := Load()
 	if err != nil {
 		return err
 	}
 
-	switch tier {
-	case 2:
-		cfg.Consent.Tier2 = &value
-	case 3:
-		cfg.Consent.Tier3 = &value
+	if cfg.Consent.Categories == nil {
+		cfg.Consent.Categories = make(map[string]bool)
 	}
+	cfg.Consent.Categories[category] = value
 
 	return saveConfig(cfg)
 }
@@ -172,9 +158,9 @@ func saveConfig(cfg Config) error {
 	return os.Rename(tmp, cfgPath)
 }
 
-func TierEnabled(cfg Config, tier int) bool {
-	for _, t := range cfg.EnabledTiers {
-		if t == tier {
+func CategoryEnabled(cfg Config, category string) bool {
+	for _, c := range cfg.EnabledCategories {
+		if c == category {
 			return true
 		}
 	}

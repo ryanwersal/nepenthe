@@ -70,7 +70,7 @@ func runReset(cmd *cobra.Command, args []string) error {
 		}
 		if err := tmutil.RemoveExclusion(e.Path); err != nil {
 			failed++
-			state.AddExclusion(&st, e.Path, e.Tier, e.Type, e.Ecosystem)
+			state.AddExclusion(&st, e.Path, e.Category, e.Type, e.Ecosystem)
 			fmt.Fprintf(os.Stderr, "Failed to remove: %s\n", e.Path)
 			continue
 		}

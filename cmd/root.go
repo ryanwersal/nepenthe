@@ -41,3 +41,11 @@ func customSentinelRules(cfg config.Config) []scanner.SentinelRule {
 	}
 	return custom
 }
+
+func enabledCategories(cfg config.Config) []scanner.Category {
+	cats := make([]scanner.Category, len(cfg.EnabledCategories))
+	for i, c := range cfg.EnabledCategories {
+		cats[i] = scanner.Category(c)
+	}
+	return cats
+}

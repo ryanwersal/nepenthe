@@ -35,11 +35,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Scanning...")
 	sentinelResults := scanner.ScanSentinelRules(scanner.WalkOptions{
-		Roots:       cfg.Roots,
-		Rules:       rules,
-		Concurrency: cfg.Concurrency.ScanWorkers,
+		Roots: cfg.Roots,
+		Rules: rules,
 	})
-	fixedResults, err := scanner.ScanFixedPaths(cfg.EnabledTiers, nil)
+	fixedResults, err := scanner.ScanFixedPaths(enabledCategories(cfg), nil)
 	if err != nil {
 		return fmt.Errorf("scanning fixed paths: %w", err)
 	}

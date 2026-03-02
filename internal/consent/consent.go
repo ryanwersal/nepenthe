@@ -9,24 +9,21 @@ import (
 	"golang.org/x/term"
 )
 
-var tierLabels = map[int]string{
-	2: "Xcode / Apple Developer caches",
-	3: "Docker containers and images",
+var categoryLabels = map[string]string{
+	"dev-caches": "Xcode / Apple Developer caches",
+	"containers": "Docker containers and images",
 }
 
-func CheckTierConsent(tier int, cfg config.Config, w io.Writer) (bool, error) {
-	var consent *bool
-	switch tier {
-	case 2:
-		consent = cfg.Consent.Tier2
-	case 3:
-		consent = cfg.Consent.Tier3
-	default:
+func CheckCategoryConsent(category string, cfg config.Config, w io.Writer) (bool, error) {
+	label, needsConsent := categoryLabels[category]
+	if !needsConsent {
 		return true, nil
 	}
 
-	if consent != nil {
-		return *consent, nil
+	if cfg.Consent.Categories != nil {
+		if answer, ok := cfg.Consent.Categories[category]; ok {
+			return answer, nil
+		}
 	}
 
 	// Non-interactive: auto-decline
@@ -34,8 +31,7 @@ func CheckTierConsent(tier int, cfg config.Config, w io.Writer) (bool, error) {
 		return false, nil
 	}
 
-	label := tierLabels[tier]
-	fmt.Fprintf(w, "Tier %d: %s\nExclude these paths? [y/N] ", tier, label)
+	fmt.Fprintf(w, "%s: %s\nExclude these paths? [y/N] ", category, label)
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
@@ -55,12 +51,12 @@ func CheckTierConsent(tier int, cfg config.Config, w io.Writer) (bool, error) {
 	answer := buf[0] == 'y' || buf[0] == 'Y'
 
 	if answer {
-		fmt.Fprintf(w, "y\nTier %d enabled.\n", tier)
+		fmt.Fprintf(w, "y\n%s enabled.\n", category)
 	} else {
-		fmt.Fprintf(w, "n\nTier %d skipped.\n", tier)
+		fmt.Fprintf(w, "n\n%s skipped.\n", category)
 	}
 
-	if err := config.SaveConsent(tier, answer); err != nil {
+	if err := config.SaveConsent(category, answer); err != nil {
 		return answer, err
 	}
 

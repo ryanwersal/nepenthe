@@ -43,35 +43,35 @@ var SentinelRules = []SentinelRule{
 	{Directory: "cdk.out", Sentinels: []string{"cdk.json"}, Ecosystem: "AWS CDK"},
 }
 
-func FixedPathTiers() (map[int][]FixedPathRule, error) {
+func FixedPathCategories() (map[Category][]FixedPathRule, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolving home directory: %w", err)
 	}
-	return map[int][]FixedPathRule{
-		2: {
-			{Path: home + "/Library/Developer/Xcode/DerivedData", Ecosystem: "Xcode", Description: "Xcode derived data", Tier: 2},
-			{Path: home + "/Library/Developer/Xcode/DocumentationCache", Ecosystem: "Xcode", Description: "Xcode documentation cache", Tier: 2},
-			{Path: home + "/Library/Developer/Xcode/iOS DeviceSupport", Ecosystem: "Xcode", Description: "iOS device support", Tier: 2},
-			{Path: home + "/Library/Developer/Xcode/tvOS DeviceSupport", Ecosystem: "Xcode", Description: "tvOS device support", Tier: 2},
-			{Path: home + "/Library/Developer/Xcode/watchOS DeviceSupport", Ecosystem: "Xcode", Description: "watchOS device support", Tier: 2},
-			{Path: home + "/Library/Developer/CoreSimulator", Ecosystem: "Xcode", Description: "Core Simulator", Tier: 2},
-			{Path: home + "/Library/Developer/XCPGDevices", Ecosystem: "Xcode", Description: "XCPGDevices", Tier: 2},
-			{Path: home + "/Library/Developer/XCTestDevices", Ecosystem: "Xcode", Description: "XCTestDevices", Tier: 2},
-			{Path: home + "/Library/Logs/CoreSimulator", Ecosystem: "Xcode", Description: "Core Simulator logs", Tier: 2},
+	return map[Category][]FixedPathRule{
+		CategoryDevCaches: {
+			{Path: home + "/Library/Developer/Xcode/DerivedData", Ecosystem: "Xcode", Description: "Xcode derived data", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/Xcode/DocumentationCache", Ecosystem: "Xcode", Description: "Xcode documentation cache", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/Xcode/iOS DeviceSupport", Ecosystem: "Xcode", Description: "iOS device support", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/Xcode/tvOS DeviceSupport", Ecosystem: "Xcode", Description: "tvOS device support", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/Xcode/watchOS DeviceSupport", Ecosystem: "Xcode", Description: "watchOS device support", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/CoreSimulator", Ecosystem: "Xcode", Description: "Core Simulator", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/XCPGDevices", Ecosystem: "Xcode", Description: "XCPGDevices", Category: CategoryDevCaches},
+			{Path: home + "/Library/Developer/XCTestDevices", Ecosystem: "Xcode", Description: "XCTestDevices", Category: CategoryDevCaches},
+			{Path: home + "/Library/Logs/CoreSimulator", Ecosystem: "Xcode", Description: "Core Simulator logs", Category: CategoryDevCaches},
 		},
-		3: {
-			{Path: home + "/Library/Containers/com.docker.docker/Data", Ecosystem: "Docker", Description: "Docker data", Tier: 3},
-			{Path: home + "/.docker", Ecosystem: "Docker", Description: "Docker config", Tier: 3},
+		CategoryContainers: {
+			{Path: home + "/Library/Containers/com.docker.docker/Data", Ecosystem: "Docker", Description: "Docker data", Category: CategoryContainers},
+			{Path: home + "/.docker", Ecosystem: "Docker", Description: "Docker config", Category: CategoryContainers},
 		},
-		4: {
-			{Path: home + "/Library/Parallels", Ecosystem: "VMs", Description: "Parallels VMs", Tier: 4},
-			{Path: home + "/Documents/Virtual Machines", Ecosystem: "VMs", Description: "Virtual machines", Tier: 4},
+		CategoryVMs: {
+			{Path: home + "/Library/Parallels", Ecosystem: "VMs", Description: "Parallels VMs", Category: CategoryVMs},
+			{Path: home + "/Documents/Virtual Machines", Ecosystem: "VMs", Description: "Virtual machines", Category: CategoryVMs},
 		},
-		5: {
-			{Path: home + "/Downloads", Ecosystem: "Optional", Description: "Downloads folder", Tier: 5},
-			{Path: "/Applications/Xcode.app", Ecosystem: "Optional", Description: "Xcode application", Tier: 5},
-			{Path: home + "/Library/Application Support/Steam/steamapps", Ecosystem: "Optional", Description: "Steam games", Tier: 5},
+		CategoryOptional: {
+			{Path: home + "/Downloads", Ecosystem: "Optional", Description: "Downloads folder", Category: CategoryOptional},
+			{Path: "/Applications/Xcode.app", Ecosystem: "Optional", Description: "Xcode application", Category: CategoryOptional},
+			{Path: home + "/Library/Application Support/Steam/steamapps", Ecosystem: "Optional", Description: "Steam games", Category: CategoryOptional},
 		},
 	}, nil
 }

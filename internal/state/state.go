@@ -15,7 +15,7 @@ type State struct {
 
 type TrackedExclusion struct {
 	Path       string `json:"path"`
-	Tier       int    `json:"tier"`
+	Category   string `json:"category"`
 	Type       string `json:"type"` // "sticky" or "fixed"
 	ExcludedAt string `json:"excludedAt"`
 	Ecosystem  string `json:"ecosystem"`
@@ -70,7 +70,7 @@ func Save(s State) error {
 	return os.Rename(tmp, path)
 }
 
-func AddExclusion(s *State, path string, tier int, typ string, ecosystem string) {
+func AddExclusion(s *State, path string, category string, typ string, ecosystem string) {
 	for _, e := range s.Exclusions {
 		if e.Path == path {
 			return
@@ -78,7 +78,7 @@ func AddExclusion(s *State, path string, tier int, typ string, ecosystem string)
 	}
 	s.Exclusions = append(s.Exclusions, TrackedExclusion{
 		Path:       path,
-		Tier:       tier,
+		Category:   category,
 		Type:       typ,
 		ExcludedAt: time.Now().UTC().Format(time.RFC3339),
 		Ecosystem:  ecosystem,

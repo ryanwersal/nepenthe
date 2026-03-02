@@ -53,7 +53,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		customFixed = append(customFixed, scanner.FixedPathRule{
 			Path:      cf.Path,
 			Ecosystem: cf.Ecosystem,
-			Tier:      0,
+			Category:  scanner.CategoryCustom,
 		})
 	}
 
@@ -63,13 +63,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Run sentinel scan
 	sentinelResults := scanner.ScanSentinelRules(scanner.WalkOptions{
-		Roots:       cfg.Roots,
-		Rules:       rules,
-		Concurrency: cfg.Concurrency.ScanWorkers,
+		Roots: cfg.Roots,
+		Rules: rules,
 	})
 
 	// Run fixed-path scan
-	fixedResults, err := scanner.ScanFixedPaths(cfg.EnabledTiers, customFixed)
+	fixedResults, err := scanner.ScanFixedPaths(enabledCategories(cfg), customFixed)
 	if err != nil {
 		return fmt.Errorf("scanning fixed paths: %w", err)
 	}
@@ -81,11 +80,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if !scanAll {
 		var filtered []scanner.ScanResult
 		for _, r := range results {
-			if r.Tier <= 1 {
+			if r.Category == scanner.CategoryDependencies || r.Category == scanner.CategoryCustom {
 				filtered = append(filtered, r)
 				continue
 			}
-			ok, err := consent.CheckTierConsent(r.Tier, cfg, os.Stdout)
+			ok, err := consent.CheckCategoryConsent(string(r.Category), cfg, os.Stdout)
 			if err != nil {
 				return err
 			}
@@ -101,7 +100,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		if !scanQuiet {
 			fmt.Println("Measuring sizes...")
 		}
-		results = scanner.MeasureSizes(results, cfg.Concurrency.MeasureWorkers)
+		results = scanner.MeasureSizes(results)
 	}
 
 	// Dry run: print table and exit
@@ -128,7 +127,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 			}
 			continue
 		}
-		state.AddExclusion(&st, r.Path, r.Tier, r.Type, r.Ecosystem)
+		state.AddExclusion(&st, r.Path, string(r.Category), r.Type, r.Ecosystem)
 		applied++
 	}
 

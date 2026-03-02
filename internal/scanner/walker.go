@@ -3,15 +3,14 @@ package scanner
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"github.com/ryanwersal/nepenthe/internal/tmutil"
 )
 
 func ScanSentinelRules(opts WalkOptions) []ScanResult {
-	if opts.Concurrency <= 0 {
-		opts.Concurrency = 8
-	}
+	concurrency := max(2, runtime.NumCPU()/2)
 
 	// Build sentinel index: sentinel filename -> []SentinelRule
 	sentinelIndex := make(map[string][]SentinelRule)
@@ -25,7 +24,7 @@ func ScanSentinelRules(opts WalkOptions) []ScanResult {
 		mu      sync.Mutex
 		results []ScanResult
 		seen    = make(map[string]bool)
-		work    = make(chan string, opts.Concurrency*2)
+		work    = make(chan string, concurrency*2)
 		wg      sync.WaitGroup
 	)
 
@@ -78,7 +77,7 @@ func ScanSentinelRules(opts WalkOptions) []ScanResult {
 				addResult(ScanResult{
 					Path:       targetPath,
 					Ecosystem:  rule.Ecosystem,
-					Tier:       1,
+					Category:   CategoryDependencies,
 					Type:       "sticky",
 					IsExcluded: excluded,
 				})
@@ -99,7 +98,7 @@ func ScanSentinelRules(opts WalkOptions) []ScanResult {
 	}
 
 	// Start fixed pool of workers
-	for range opts.Concurrency {
+	for range concurrency {
 		go func() {
 			for dir := range work {
 				processDir(dir)
@@ -119,15 +118,15 @@ func ScanSentinelRules(opts WalkOptions) []ScanResult {
 	return results
 }
 
-func ScanFixedPaths(enabledTiers []int, customPaths []FixedPathRule) ([]ScanResult, error) {
-	tiers, err := FixedPathTiers()
+func ScanFixedPaths(enabledCategories []Category, customPaths []FixedPathRule) ([]ScanResult, error) {
+	categories, err := FixedPathCategories()
 	if err != nil {
 		return nil, err
 	}
 	var rules []FixedPathRule
 
-	for _, tier := range enabledTiers {
-		if paths, ok := tiers[tier]; ok {
+	for _, cat := range enabledCategories {
+		if paths, ok := categories[cat]; ok {
 			rules = append(rules, paths...)
 		}
 	}
@@ -152,7 +151,7 @@ func ScanFixedPaths(enabledTiers []int, customPaths []FixedPathRule) ([]ScanResu
 			results = append(results, ScanResult{
 				Path:       r.Path,
 				Ecosystem:  r.Ecosystem,
-				Tier:       r.Tier,
+				Category:   r.Category,
 				Type:       "sticky",
 				IsExcluded: excluded,
 			})

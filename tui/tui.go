@@ -189,15 +189,18 @@ func (m Model) startScan() tea.Cmd {
 		rules := scanner.BuildSentinelRules(custom)
 
 		scanner.ScanSentinelRules(scanner.WalkOptions{
-			Roots:       cfg.Roots,
-			Rules:       rules,
-			Concurrency: cfg.Concurrency.ScanWorkers,
+			Roots: cfg.Roots,
+			Rules: rules,
 			OnFound: func(r scanner.ScanResult) {
 				ch <- r
 			},
 		})
 
-		fixedResults, err := scanner.ScanFixedPaths(cfg.EnabledTiers, nil)
+		cats := make([]scanner.Category, len(cfg.EnabledCategories))
+		for i, c := range cfg.EnabledCategories {
+			cats[i] = scanner.Category(c)
+		}
+		fixedResults, err := scanner.ScanFixedPaths(cats, nil)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -535,7 +538,7 @@ func (m *Model) startApplyExclusions() tea.Cmd {
 			if err := tmutil.AddExclusion(r.Path); err != nil {
 				failed++
 			} else {
-				state.AddExclusion(&st, r.Path, r.Tier, r.Type, r.Ecosystem)
+				state.AddExclusion(&st, r.Path, string(r.Category), r.Type, r.Ecosystem)
 				applied++
 				success = true
 			}
@@ -620,9 +623,8 @@ func (m Model) startMeasure() tea.Cmd {
 	results := make([]scanner.ScanResult, len(m.results))
 	copy(results, m.results)
 	ch := m.measureCh
-	concurrency := m.cfg.Concurrency.MeasureWorkers
 	return func() tea.Msg {
-		scanner.MeasureSizesStream(results, concurrency, func(sm scanner.SizeMeasurement) {
+		scanner.MeasureSizesStream(results, func(sm scanner.SizeMeasurement) {
 			ch <- SizeMeasuredMsg{
 				Index:     sm.Index,
 				SizeBytes: sm.SizeBytes,
