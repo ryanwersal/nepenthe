@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -646,9 +645,6 @@ func (m *Model) startSettingsEdit(field settingsEditField, initial string) {
 	case editCustomEcosystem:
 		ti.Placeholder = "e.g. Node.js"
 		ti.Prompt = "Ecosystem: "
-	case editSchedule:
-		ti.Placeholder = "86400"
-		ti.Prompt = "Interval (seconds): "
 	}
 	ti.SetValue(initial)
 	ti.Focus()
@@ -670,14 +666,6 @@ func (m Model) confirmSettingsEdit(val string) (tea.Model, tea.Cmd) {
 		m.settingsField = editNone
 		m.settingsTmpVal = ""
 		return m, m.addCustomFixedPath(path, val)
-	case editSchedule:
-		m.settingsField = editNone
-		secs, err := strconv.Atoi(strings.TrimSuffix(val, "s"))
-		if err != nil || secs <= 0 {
-			m.message = "Invalid interval"
-			return m, nil
-		}
-		return m, m.setScheduleInterval(secs)
 	}
 	m.settingsField = editNone
 	return m, nil
@@ -737,13 +725,6 @@ func (m Model) deleteSettingsItem(item settingsItem) tea.Cmd {
 func (m Model) addCustomFixedPath(path, ecosystem string) tea.Cmd {
 	return func() tea.Msg {
 		cfg, err := config.AddCustomFixedPath(path, ecosystem)
-		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
-	}
-}
-
-func (m Model) setScheduleInterval(secs int) tea.Cmd {
-	return func() tea.Msg {
-		cfg, err := config.SetScheduleInterval(secs)
 		return ConfigUpdatedMsg{Cfg: cfg, Err: err}
 	}
 }

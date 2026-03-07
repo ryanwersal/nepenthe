@@ -9,7 +9,7 @@ Nepenthe finds high-churn and regenerable directories — `node_modules`, `.buil
 ### Homebrew
 
 ```sh
-brew install ryanwersal/tap/nepenthe
+brew install ryanwersal/tools/nepenthe
 ```
 
 ### From source
@@ -39,6 +39,16 @@ nepenthe scan
 ```
 
 Run `nepenthe --help` for the full command reference.
+
+## Scheduled scanning
+
+Run scans automatically with Homebrew services:
+
+```sh
+brew services start nepenthe
+```
+
+This runs `nepenthe scan --accept-consents` every 24 hours. Logs are written to `$(brew --prefix)/var/log/nepenthe/`.
 
 ## Development
 

@@ -56,8 +56,6 @@ func init() {
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(resetCmd)
-	rootCmd.AddCommand(installCmd)
-	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 

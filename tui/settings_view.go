@@ -26,7 +26,6 @@ const (
 	editRoot
 	editCustomPath
 	editCustomEcosystem
-	editSchedule
 )
 
 type settingsItem struct {
@@ -94,15 +93,6 @@ func buildSettingsItems(cfg config.Config) []settingsItem {
 		Kind:      settingsAddButton,
 		Label:     "+ add custom path",
 		EditField: editCustomPath,
-	})
-
-	// Schedule section
-	items = append(items, settingsItem{Kind: settingsHeader, Label: "Schedule"})
-	items = append(items, settingsItem{
-		Kind:      settingsValue,
-		Label:     "Interval",
-		Value:     fmt.Sprintf("%ds", cfg.Schedule.IntervalSeconds),
-		EditField: editSchedule,
 	})
 
 	return items

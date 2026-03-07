@@ -38,9 +38,6 @@ func TestLoadRoundTrip(t *testing.T) {
 	tomlContent := `
 roots = ["/tmp/test"]
 enabledCategories = ["dependencies", "vms"]
-
-[schedule]
-intervalSeconds = 3600
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(tomlContent), 0o644); err != nil {
 		t.Fatal(err)
@@ -61,9 +58,6 @@ intervalSeconds = 3600
 	if !CategoryEnabled(cfg, "vms") {
 		t.Error("expected vms to be enabled from file")
 	}
-	if cfg.Schedule.IntervalSeconds != 3600 {
-		t.Errorf("expected interval 3600, got %d", cfg.Schedule.IntervalSeconds)
-	}
 }
 
 func TestLoadMissingFile(t *testing.T) {
@@ -78,8 +72,5 @@ func TestLoadMissingFile(t *testing.T) {
 	// Should return defaults
 	if len(cfg.Roots) != 1 || cfg.Roots[0] != tmpHome {
 		t.Errorf("expected default root %s, got %v", tmpHome, cfg.Roots)
-	}
-	if cfg.Schedule.IntervalSeconds != 86400 {
-		t.Errorf("expected default interval 86400, got %d", cfg.Schedule.IntervalSeconds)
 	}
 }

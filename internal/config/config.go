@@ -15,7 +15,6 @@ type Config struct {
 	Roots             []string          `toml:"roots"`
 	EnabledCategories []string          `toml:"enabledCategories"`
 	CustomFixedPaths  []CustomFixedPath `toml:"customFixedPaths"`
-	Schedule          Schedule          `toml:"schedule"`
 	Consent           Consent           `toml:"consent"`
 }
 
@@ -23,10 +22,6 @@ type CustomFixedPath struct {
 	Path        string `toml:"path"`
 	Ecosystem   string `toml:"ecosystem"`
 	Description string `toml:"description"`
-}
-
-type Schedule struct {
-	IntervalSeconds int `toml:"intervalSeconds"`
 }
 
 type Consent struct {
@@ -57,7 +52,6 @@ func DefaultConfig() (Config, error) {
 	return Config{
 		Roots:             []string{home},
 		EnabledCategories: []string{"dependencies", "dev-caches", "containers"},
-		Schedule:          Schedule{IntervalSeconds: 86400},
 	}, nil
 }
 
@@ -94,9 +88,6 @@ func Load() (Config, error) {
 	}
 	if len(fileCfg.CustomFixedPaths) > 0 {
 		cfg.CustomFixedPaths = fileCfg.CustomFixedPaths
-	}
-	if fileCfg.Schedule.IntervalSeconds > 0 {
-		cfg.Schedule.IntervalSeconds = fileCfg.Schedule.IntervalSeconds
 	}
 	if len(fileCfg.Consent.Categories) > 0 {
 		cfg.Consent.Categories = fileCfg.Consent.Categories
@@ -231,11 +222,3 @@ func RemoveCustomFixedPath(path string) (Config, error) {
 	return cfg, saveConfig(cfg)
 }
 
-func SetScheduleInterval(seconds int) (Config, error) {
-	cfg, err := Load()
-	if err != nil {
-		return cfg, err
-	}
-	cfg.Schedule.IntervalSeconds = seconds
-	return cfg, saveConfig(cfg)
-}

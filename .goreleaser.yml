@@ -34,6 +34,12 @@ brews:
       bin.install "nepenthe"
     test: |
       system bin/"nepenthe", "version"
+    service: |
+      run [opt_bin/"nepenthe", "scan", "--accept-consents", "--log-format", "json"]
+      run_type :interval
+      interval 86400
+      log_path var/"log/nepenthe/stdout.log"
+      error_log_path var/"log/nepenthe/stderr.log"
 
 changelog:
   sort: asc

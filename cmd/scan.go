@@ -21,7 +21,7 @@ import (
 var (
 	scanDryRun bool
 	scanSizes  bool
-	scanAll    bool
+	scanAcceptConsents bool
 )
 
 var scanCmd = &cobra.Command{
@@ -33,7 +33,7 @@ var scanCmd = &cobra.Command{
 func init() {
 	scanCmd.Flags().BoolVar(&scanDryRun, "dry-run", false, "Preview only, no changes")
 	scanCmd.Flags().BoolVar(&scanSizes, "sizes", false, "Measure directory sizes (slower)")
-	scanCmd.Flags().BoolVar(&scanAll, "all", false, "Skip consent prompts")
+	scanCmd.Flags().BoolVar(&scanAcceptConsents, "accept-consents", false, "Skip consent prompts")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -98,7 +98,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	slog.Info("scan complete", "found", len(results), "elapsed", time.Since(scanStart))
 
 	// Filter by consent
-	if !scanAll {
+	if !scanAcceptConsents {
 		var filtered []scanner.ScanResult
 		for _, r := range results {
 			if r.Category == scanner.CategoryDependencies || r.Category == scanner.CategoryCustom {
