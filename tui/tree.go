@@ -2,7 +2,7 @@ package tui
 
 import (
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/ryanwersal/nepenthe/internal/scanner"
@@ -140,14 +140,14 @@ func buildEcosystemTree(results []scanner.ScanResult) (*TreeNode, map[int]*TreeN
 	}
 
 	// Sort ecosystem groups alphabetically
-	sort.Slice(root.Children, func(i, j int) bool {
-		return root.Children[i].Label < root.Children[j].Label
+	slices.SortFunc(root.Children, func(a, b *TreeNode) int {
+		return strings.Compare(a.Label, b.Label)
 	})
 
 	// Sort leaves within each group by path
 	for _, group := range root.Children {
-		sort.Slice(group.Children, func(i, j int) bool {
-			return group.Children[i].FullPath < group.Children[j].FullPath
+		slices.SortFunc(group.Children, func(a, b *TreeNode) int {
+			return strings.Compare(a.FullPath, b.FullPath)
 		})
 	}
 
@@ -306,8 +306,8 @@ func findChild(node *TreeNode, label string) *TreeNode {
 }
 
 func sortChildren(node *TreeNode) {
-	sort.Slice(node.Children, func(i, j int) bool {
-		return node.Children[i].Label < node.Children[j].Label
+	slices.SortFunc(node.Children, func(a, b *TreeNode) int {
+		return strings.Compare(a.Label, b.Label)
 	})
 	for _, child := range node.Children {
 		sortChildren(child)
