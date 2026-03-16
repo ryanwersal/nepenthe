@@ -10,6 +10,8 @@
       "Bash(go mod:*)",
       "Bash(go generate:*)",
       "Bash(golangci-lint:*)",
+      "Bash(go list:*)",
+      "Bash(mise:*)",
       "WebSearch"
     ]
   }
