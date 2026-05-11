@@ -15,31 +15,31 @@ builds:
       - -X github.com/ryanwersal/nepenthe/cmd.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     files:
       - LICENSE
 
-brews:
-  - repository:
-      owner: ryanwersal
-      name: homebrew-tools
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    name: nepenthe
+homebrew_casks:
+  - name: nepenthe
+    binaries:
+      - nepenthe
     homepage: https://github.com/ryanwersal/nepenthe
     description: Selective forgetfulness for macOS Time Machine
     license: GPL-3.0
-    custom_block: |
-      depends_on :macos
-    install: |
-      bin.install "nepenthe"
-    test: |
-      system bin/"nepenthe", "version"
-    service: |
-      run [opt_bin/"nepenthe", "scan", "--accept-consents", "--log-format", "json"]
-      run_type :interval
-      interval 86400
-      log_path var/"log/nepenthe/stdout.log"
-      error_log_path var/"log/nepenthe/stderr.log"
+    # Strip Gatekeeper quarantine from the unsigned binary so it runs on
+    # first launch without "cannot be opened because the developer cannot
+    # be verified".
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/nepenthe"]
+          end
+    repository:
+      owner: ryanwersal
+      name: homebrew-tools
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
 
 changelog:
   sort: asc

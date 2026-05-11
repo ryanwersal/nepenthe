@@ -40,16 +40,6 @@ nepenthe scan
 
 Run `nepenthe --help` for the full command reference.
 
-## Scheduled scanning
-
-Run scans automatically with Homebrew services:
-
-```sh
-brew services start nepenthe
-```
-
-This runs `nepenthe scan --accept-consents` every 24 hours. Logs are written to `$(brew --prefix)/var/log/nepenthe/`.
-
 ## Development
 
 ```sh
