@@ -25,7 +25,7 @@ homebrew_casks:
       - nepenthe
     homepage: https://github.com/ryanwersal/nepenthe
     description: Selective forgetfulness for macOS Time Machine
-    license: GPL-3.0
+    license: Apache-2.0
     # Strip Gatekeeper quarantine from the unsigned binary so it runs on
     # first launch without "cannot be opened because the developer cannot
     # be verified".
